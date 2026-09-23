@@ -36,7 +36,7 @@ try {
         agreementText: "temporary smoke-test row",
         startingMarketCap: 100_000_000_000n,
         graduationMarketCap: 250_000_000_000n,
-        monetization: "{}",
+        monetization: JSON.stringify({ mode: "DEMO_PROTOCOL", graduation: { issuerPct: 48, platformPct: 2, liquidityPct: 50 }, dbcTradingFees: { creatorPct: 50, partnerPct: 50 } }),
       },
     });
     console.log(`added ${ID}`);
