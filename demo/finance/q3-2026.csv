@@ -1,0 +1,35 @@
+id,created,type,category,description,amount,currency
+txn_3Q7a01,2026-07-31,charge,subscription_revenue,Stripe subscription charges - July 2026,410000.00,usd
+txn_3Q8a02,2026-08-31,charge,subscription_revenue,Stripe subscription charges - August 2026,425000.00,usd
+txn_3Q9a03,2026-09-30,charge,subscription_revenue,Stripe subscription charges - September 2026,440000.00,usd
+in_3Q7b04,2026-07-15,invoice_payment,annual_prepayment,Annual plan prepayment - Globex Corp (wire),50000.00,usd
+in_3Q9b05,2026-09-02,invoice_payment,annual_prepayment,Annual plan prepayment - Initech (wire),35000.00,usd
+re_3Q7c06,2026-07-31,refund,refunds,Customer refunds - July 2026,-4000.00,usd
+re_3Q8c07,2026-08-31,refund,refunds,Customer refunds - August 2026,-4500.00,usd
+re_3Q9c08,2026-09-30,refund,refunds,Customer refunds - September 2026,-4000.00,usd
+fee_3Q7d09,2026-07-31,stripe_fee,payment_processing,Stripe processing fees - July 2026,-12000.00,usd
+fee_3Q8d10,2026-08-31,stripe_fee,payment_processing,Stripe processing fees - August 2026,-12500.00,usd
+fee_3Q9d11,2026-09-30,stripe_fee,payment_processing,Stripe processing fees - September 2026,-13000.00,usd
+exp_3Q7e12,2026-07-31,expense,payroll,Salaries - July 2026 (Gusto),-180000.00,usd
+exp_3Q8e13,2026-08-31,expense,payroll,Salaries - August 2026 (Gusto),-180000.00,usd
+exp_3Q9e14,2026-09-30,expense,payroll,Salaries - September 2026 (Gusto),-180000.00,usd
+exp_3Q7e15,2026-07-31,expense,payroll_taxes_benefits,Employer payroll taxes + health benefits - July,-21000.00,usd
+exp_3Q8e16,2026-08-31,expense,payroll_taxes_benefits,Employer payroll taxes + health benefits - August,-21000.00,usd
+exp_3Q9e17,2026-09-30,expense,payroll_taxes_benefits,Employer payroll taxes + health benefits - September,-21000.00,usd
+exp_3Q7e18,2026-07-05,expense,hosting,AWS - June usage,-28000.00,usd
+exp_3Q8e19,2026-08-05,expense,hosting,AWS - July usage,-28000.00,usd
+exp_3Q9e20,2026-09-05,expense,hosting,AWS - August usage,-28000.00,usd
+exp_3Q7e21,2026-07-01,expense,software,SaaS tools (Slack Google Workspace GitHub Figma Datadog) - July,-6500.00,usd
+exp_3Q8e22,2026-08-01,expense,software,SaaS tools (Slack Google Workspace GitHub Figma Datadog) - August,-6500.00,usd
+exp_3Q9e23,2026-09-01,expense,software,SaaS tools (Slack Google Workspace GitHub Figma Datadog) - September,-6500.00,usd
+exp_3Q7e24,2026-07-01,expense,rent,Office rent - July,-12000.00,usd
+exp_3Q8e25,2026-08-01,expense,rent,Office rent - August,-12000.00,usd
+exp_3Q9e26,2026-09-01,expense,rent,Office rent - September,-12000.00,usd
+exp_3Q8e27,2026-08-20,expense,marketing,Google Ads - Q3 campaign,-45000.00,usd
+exp_3Q9e28,2026-09-18,expense,marketing,LinkedIn Ads - Q3 campaign,-38000.00,usd
+exp_3Q9e29,2026-09-25,expense,professional_fees,Legal + accounting (Cooley / Pilot),-15000.00,usd
+tax_3Q9f30,2026-09-15,tax_payment,income_tax,Federal estimated income tax payment Q3,-30000.00,usd
+loan_3Q9g31,2026-09-28,debt_service,debt_service,SVB term loan - principal + interest,-9500.00,usd
+cap_3Q8h32,2026-08-12,capex,capital_expenditure,MacBook Pro x4 for new engineers,-12000.00,usd
+res_3Q9i33,2026-09-30,transfer,reserves,Transfer to operating reserve account (board-approved),-18000.00,usd
+jnl_3Q9j34,2026-09-30,journal,depreciation,Depreciation - Q3 (non-cash; memo only),-4000.00,usd
