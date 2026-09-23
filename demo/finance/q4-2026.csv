@@ -1,0 +1,22 @@
+section,line_item,oct_2026,nov_2026,dec_2026,q4_2026_total
+Cash receipts,Subscription revenue (Stripe gross),455000,468000,482000,1405000
+Cash receipts,Annual plan prepayments (invoiced + wired),0,70000,50000,120000
+Cash receipts,Refunds issued,-5000,-5000,-5000,-15000
+Cash receipts,Total cash receipts,450000,533000,527000,1510000
+Operating expenses,Payroll (salaries),190000,190000,190000,570000
+Operating expenses,Payroll taxes & benefits,22500,22500,22500,67500
+Operating expenses,Hosting (AWS),30000,30000,30000,90000
+Operating expenses,Software & SaaS tools,7000,7000,7000,21000
+Operating expenses,Rent,12000,12000,12000,36000
+Operating expenses,Marketing (paid ads),52000,41000,0,93000
+Operating expenses,Payment processing (Stripe fees),13500,14000,14500,42000
+Operating expenses,Professional fees (legal / accounting / year-end audit prep),5000,5000,12000,22000
+Operating expenses,Total operating expenses,332000,321500,288000,941500
+Non-cash items (memo),Depreciation & amortization,1400,1400,1400,4200
+Non-cash items (memo),Stock-based compensation,8000,8000,8000,24000
+Accrual P&L,Operating income (accrual; after non-cash items),108600,202100,229600,540300
+Other cash outflows,Income tax payments,0,0,35000,35000
+Other cash outflows,Debt service (SVB term loan P+I),3000,3000,3500,9500
+Other cash outflows,Capital expenditures (servers + laptops),0,24000,0,24000
+Other cash outflows,Transfer to operating reserve (board-approved),0,0,50000,50000
+Other cash outflows,Total other cash outflows,3000,27000,88500,118500

@@ -27,13 +27,16 @@ If it returns an error, stop and explain. Do not retry or work around it:
 - **Several issuances** → show a short table (Issuer, Symbol, Rights, Frequency, Next record date,
   Status) and ask which one, unless the founder already named it. Default to the most recent.
 - For the chosen issuance call `fundraise_get_market` with its `id`. Then:
-  - `pendingDistributions` contains a `DRAFT` or `SNAPSHOTTED` entry → tell the founder a distribution
-    for `<periodLabel>` is in progress and hand off to `fundraise-distribute`
-    (`/fstack:fundraise-distribute`). Show the status below first.
-  - `distributionDue: true` (the record date has passed) → tell the founder the period is due and hand
-    off to `fundraise-report` (`/fstack:fundraise-report`) to report its Distributable Cash Flow.
-  - Otherwise → show the status (Step 3).
-- Founder asks about investors/holders → follow `fundraise-investors`.
+  - `pendingDistributions` contains a `DRAFT` or `SNAPSHOTTED` entry → a distribution for
+    `<periodLabel>` is in progress. Show the status (Step 3), then hand off to the `fundraise-distribute`
+    skill (`/fstack:fundraise-distribute`, `$fstack-fundraise-distribute`), which uses
+    `fundraise_snapshot` and `fundraise_execute_distribution`.
+  - `distributionDue: true` (the record date `nextRecordDate` has passed) → the period is due. Show the
+    status, then hand off to the `fundraise-report` skill (`/fstack:fundraise-report`,
+    `$fstack-fundraise-report`) to report its Distributable Cash Flow (`fundraise_report_period`).
+  - Otherwise → show the status (Step 3). For past distributions the founder can ask for details
+    (`fundraise_list_distributions`, `fundraise_get_distribution`, both read-only).
+- Founder asks about investors/holders → follow `fundraise-investors` (`/fstack:fundraise-investors`).
 
 ## Step 3: Status
 

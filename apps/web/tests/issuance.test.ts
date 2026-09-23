@@ -105,6 +105,10 @@ describe("create gate", () => {
     expect(body.status).toBe("LIVE");
     expect(body.agreement.hash).toBe(agreementHash);
     expect(body.agreement.text).toContain("Acme SaaS");
+    expect(body.dcfDefinition).toMatch(/^Cash receipts from the Issuer's operations/);
+    expect(body.agreement.text).toContain(body.dcfDefinition);
+    expect(body.terms.poolPercentageBps).toBe(1000);
+    expect(body.nextRecordDate).toBeTruthy();
 
     const list = await (await listGET(new Request("http://test", { headers: AUTH }))).json();
     expect(list.issuances.some((i: { id: string }) => i.id === issuanceId)).toBe(true);

@@ -15,3 +15,4 @@ test-ledger
 !.env.example
 apps/web/.env
 apps/web/.fake-chain.json
+.claude/worktrees/

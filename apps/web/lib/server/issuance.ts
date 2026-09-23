@@ -4,6 +4,8 @@ import type { Issuance } from "@prisma/client";
 import {
   AGREEMENT_VERSION,
   COPY,
+  DEFAULT_DCF_DEFINITION,
+  DEFAULT_RECORD_DATE_RULE,
   DEMO_PROTOCOL_CONFIG,
   agreementHash,
   deriveLaunchPricing,
@@ -398,8 +400,15 @@ export async function getIssuanceOr404(id: string) {
   return issuance;
 }
 
+/** Launch terms as stored with the preview that created the issuance (source of dcfDefinition etc.). */
+export async function getLaunchTerms(issuanceId: string): Promise<CashFlowTerms | null> {
+  const preview = await prisma.issuancePreview.findFirst({ where: { issuanceId } });
+  return preview ? deserializeTerms(preview.termsJson).terms : null;
+}
+
 /** Public, secret-free view (GET /api/issuances/:id). Also serves as the token metadata URI. */
-export function publicIssuanceView(i: Issuance) {
+export function publicIssuanceView(i: Issuance, launchTerms: CashFlowTerms | null = null) {
+  const dcfDefinition = launchTerms?.distributableCashFlowDefinition ?? DEFAULT_DCF_DEFINITION;
   const monetization = parseJson<MonetizationConfig>(i.monetization) ?? DEMO_PROTOCOL_CONFIG;
   const cfg = parseJson<{ address?: string; poolOwners?: string[]; signatures?: string[]; dbcParams?: unknown }>(i.dbcConfig);
   return {
@@ -411,7 +420,12 @@ export function publicIssuanceView(i: Issuance) {
     issuerName: i.issuerName,
     rightsType: i.rightsType,
     status: i.baseMint ? "LIVE" : "PENDING",
+    dcfDefinition,
     terms: {
+      tokenName: i.name,
+      issuerJurisdiction: launchTerms?.issuerJurisdiction ?? null,
+      distributableCashFlowDefinition: dcfDefinition,
+      recordDateRule: launchTerms?.recordDateRule ?? DEFAULT_RECORD_DATE_RULE,
       poolPercentageBps: i.poolPercentageBps,
       poolPercentage: pctDisplay(i.poolPercentageBps),
       tokenSupply: i.tokenSupply,

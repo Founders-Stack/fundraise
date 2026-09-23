@@ -1,6 +1,6 @@
 import { json } from "@/lib/json";
 import { handle } from "@/lib/server/http";
-import { getIssuanceOr404, publicIssuanceView } from "@/lib/server/issuance";
+import { getIssuanceOr404, getLaunchTerms, publicIssuanceView } from "@/lib/server/issuance";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   return handle(async () => {
     const { id } = await ctx.params;
-    return json(publicIssuanceView(await getIssuanceOr404(id)));
+    const issuance = await getIssuanceOr404(id);
+    return json(publicIssuanceView(issuance, await getLaunchTerms(id)));
   });
 }
