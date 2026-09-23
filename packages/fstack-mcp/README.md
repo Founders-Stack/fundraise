@@ -19,6 +19,15 @@ the server just **forwards your bearer token** and returns the API's JSON.
 | Tool | API | Mutates |
 |---|---|---|
 | `fundraise_list_issuances` | `GET /api/issuances` | — |
+| `fundraise_report_period` | `POST /api/issuances/:id/distributions` `{ periodLabel, dcf, reportUrl? }` | DB (DRAFT) |
+| `fundraise_list_distributions` | `GET /api/issuances/:id/distributions` (public) | — |
+| `fundraise_snapshot` | `POST /api/distributions/:id/snapshot` | DB (preview + `confirmTotal`) |
+| `fundraise_execute_distribution` | `POST /api/distributions/:id/execute` `{ confirmTotal }` | ✅ USDC |
+| `fundraise_get_distribution` | `GET /api/distributions/:id` | — |
+
+Distribution amounts (`dcf`, `confirmTotal`) are USDC **decimal strings** (`"400000"`, `"4,000.00"`), never
+base units. `confirmTotal` must be the exact total the founder typed; the API rejects any mismatch, so an
+agent can't skip the preview. Executing twice is a no-op; retrying after a partial failure pays only unpaid rows.
 
 More tools (preview/create issuance, market, holders, report, snapshot, execute) land in
 later tasks; see SPEC section 0.3.
