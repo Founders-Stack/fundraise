@@ -40,7 +40,7 @@ export default async function Home() {
                   <TableRow key={i.id}>
                     <TableCell>{i.issuerName}</TableCell>
                     <TableCell>{i.symbol}</TableCell>
-                    <TableCell>{(i.poolPercentage * 100).toFixed(1)}% of DCF</TableCell>
+                    <TableCell>{(i.poolPercentageBps / 100).toFixed(1)}% of DCF</TableCell>
                     <TableCell className="text-right">
                       <Link className="underline" href={`/market/${i.id}`}>Market</Link>
                     </TableCell>

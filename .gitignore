@@ -14,3 +14,4 @@ test-ledger
 .env.*
 !.env.example
 apps/web/.env
+apps/web/.fake-chain.json

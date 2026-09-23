@@ -1,0 +1,97 @@
+// Chain ports: the only seam between the API (brain) and Solana.
+// API routes depend on these interfaces, never on the Meteora/SPL SDKs directly.
+// Two implementations: `fake.ts` (CHAIN_MODE=fake, local dev + tests) and
+// `real.ts` (CHAIN_MODE=devnet, Meteora DBC + Token-2022 + fs_allowlist).
+// All amounts are bigint base units (USDC 6 dp, rights token 6 dp).
+import type { DbcFeeParams, HolderBalance } from "@fstack/core";
+
+export interface CreatePoolInput {
+  name: string;
+  symbol: string;
+  /** Metadata URI for the token (may be a data: or API URL). */
+  uri: string;
+  tokenSupply: bigint; // whole tokens
+  tokenDecimals: number;
+  startingMarketCap: bigint; // USDC base units
+  graduationMarketCap: bigint; // USDC base units
+  fees: DbcFeeParams;
+  /** Issuer LP ownership after graduation: 100 = issuer owns all locked LP (SPEC section 5). */
+  creatorLockedLiquidityPercentage: number;
+}
+
+export interface CreatePoolResult {
+  baseMint: string;
+  dbcConfig: string;
+  dbcPool: string;
+  /** DBC pool authority / vault owners that were allowlisted as infrastructure. */
+  poolOwners: string[];
+  signatures: string[];
+  /** Normalized params actually sent to DBC, for display ("How your market is configured"). */
+  dbcParams: Record<string, unknown>;
+}
+
+export interface MarketState {
+  dbcPool: string;
+  baseMint: string;
+  quoteMint: string;
+  /** USDC base units per 1 whole token. */
+  price: bigint;
+  quoteReserve: bigint;
+  migrationQuoteThreshold: bigint;
+  /** 0..10000 */
+  progressBps: number;
+  isMigrated: boolean;
+  dammPool?: string;
+  accruedFees: { creator: bigint; partner: bigint };
+}
+
+export interface SwapQuote {
+  side: "BUY" | "SELL";
+  amountIn: bigint;
+  amountOut: bigint;
+  price: bigint;
+  priceImpactBps: number;
+  poolFee: bigint;
+  /** Estimated network fee in lamports. */
+  networkFeeLamports: bigint;
+}
+
+export interface MarketPort {
+  createIssuancePool(input: CreatePoolInput): Promise<CreatePoolResult>;
+  getMarketState(dbcPool: string): Promise<MarketState>;
+  quote(dbcPool: string, side: "BUY" | "SELL", amountIn: bigint): Promise<SwapQuote>;
+  /** Unsigned, base64-serialized transaction for the investor's wallet to sign. */
+  buildSwapTx(
+    dbcPool: string,
+    owner: string,
+    side: "BUY" | "SELL",
+    amountIn: bigint,
+    minAmountOut: bigint,
+  ): Promise<{ tx: string }>;
+}
+
+export interface RegistryPort {
+  /** Adds an AllowEntry for (mint, wallet). Idempotent. */
+  allowWallet(mint: string, wallet: string): Promise<{ signature: string }>;
+  /**
+   * All token accounts of the mint with non-zero balance, merged by owner.
+   * `kind` is POOL for `poolOwners`, otherwise UNREGISTERED — the API
+   * upgrades matches against Participant rows to PARTICIPANT.
+   */
+  getHolders(mint: string, poolOwners: string[]): Promise<{ slot: number; holders: HolderBalance[] }>;
+}
+
+export interface PayoutPort {
+  quoteMint(): string;
+  issuerAddress(): string;
+  getIssuerQuoteBalance(): Promise<bigint>;
+  /** Transfers USDC from the issuer to each wallet in ONE transaction (caller batches ≤ 10). */
+  transferBatch(rows: { wallet: string; amount: bigint }[]): Promise<{ signature: string }>;
+}
+
+export interface ChainPorts {
+  mode: "fake" | "devnet";
+  market: MarketPort;
+  registry: RegistryPort;
+  payout: PayoutPort;
+}

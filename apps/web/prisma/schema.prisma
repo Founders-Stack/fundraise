@@ -15,7 +15,7 @@ model Issuance {
   id                    String   @id @default(cuid())
   issuerName            String
   rightsType            String   @default("CASH_FLOW") // CASH_FLOW | VENTURE_EXIT (future)
-  poolPercentage        Float    // e.g. 0.10 = 10% of DCF
+  poolPercentageBps     Int      // basis points of DCF, e.g. 1000 = 10%
   tokenSupply           BigInt   // whole tokens, e.g. 1_000_000
   symbol                String
   name                  String
@@ -23,16 +23,17 @@ model Issuance {
   nextRecordDate        DateTime?
 
   // curve inputs (SPEC section 5)
-  expectedAnnualDcf     Float
-  targetInitialYield    Float
+  expectedAnnualDcf     BigInt   // USDC base units (6 dp)
+  targetInitialYieldBps Int
+  graduationMultiple    Float    @default(3)
 
   agreementVersion      String
   agreementHash         String
   agreementText         String
 
   // derived, stored
-  startingMarketCap     Float
-  graduationMarketCap   Float
+  startingMarketCap     BigInt   // USDC base units
+  graduationMarketCap   BigInt   // USDC base units
 
   quoteMint             String?
   baseMint              String?
@@ -70,12 +71,13 @@ model Distribution {
   issuanceId     String
   issuance       Issuance  @relation(fields: [issuanceId], references: [id], onDelete: Cascade)
   periodLabel    String    // e.g. 2026-Q3
-  dcf            Float     // issuer-reported distributable cash flow (USD)
+  dcf            BigInt    // issuer-reported distributable cash flow, USDC base units
   reportUrl      String?
   reportHash     String    // sha256 of report JSON
-  poolPercentage Float
+  poolPercentageBps Int
   rightsPool     BigInt    // USDC base units (6 dp)
-  perToken       Float     // USDC per whole token
+  perTokenBaseUnits BigInt // USDC base units per whole token
+  snapshotJson   String?   // immutable snapshot (holders incl. POOL/UNREGISTERED) as JSON
   status         String    @default("DRAFT") // DRAFT | SNAPSHOTTED | EXECUTED
   snapshotSlot   BigInt?
   totalAllocated BigInt?   // USDC base units
@@ -100,4 +102,14 @@ model Allocation {
   txSignature    String?
 
   @@unique([distributionId, wallet])
+}
+
+// Preview-before-create gate (SPEC 0.3): POST /api/issuances requires an unused previewId.
+model IssuancePreview {
+  id         String    @id @default(cuid())
+  termsJson  String    // CashFlowTerms + graduationMultiple + monetization, as JSON (bigint as string)
+  derivedJson String   // LaunchPricing + fee params + economics, as JSON
+  usedAt     DateTime?
+  issuanceId String?
+  createdAt  DateTime  @default(now())
 }

@@ -3,19 +3,20 @@ CREATE TABLE "Issuance" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "issuerName" TEXT NOT NULL,
     "rightsType" TEXT NOT NULL DEFAULT 'CASH_FLOW',
-    "poolPercentage" REAL NOT NULL,
+    "poolPercentageBps" INTEGER NOT NULL,
     "tokenSupply" BIGINT NOT NULL,
     "symbol" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "distributionFrequency" TEXT NOT NULL DEFAULT 'QUARTERLY',
     "nextRecordDate" DATETIME,
-    "expectedAnnualDcf" REAL NOT NULL,
-    "targetInitialYield" REAL NOT NULL,
+    "expectedAnnualDcf" BIGINT NOT NULL,
+    "targetInitialYieldBps" INTEGER NOT NULL,
+    "graduationMultiple" REAL NOT NULL DEFAULT 3,
     "agreementVersion" TEXT NOT NULL,
     "agreementHash" TEXT NOT NULL,
     "agreementText" TEXT NOT NULL,
-    "startingMarketCap" REAL NOT NULL,
-    "graduationMarketCap" REAL NOT NULL,
+    "startingMarketCap" BIGINT NOT NULL,
+    "graduationMarketCap" BIGINT NOT NULL,
     "quoteMint" TEXT,
     "baseMint" TEXT,
     "dbcConfig" TEXT,
@@ -45,12 +46,13 @@ CREATE TABLE "Distribution" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "issuanceId" TEXT NOT NULL,
     "periodLabel" TEXT NOT NULL,
-    "dcf" REAL NOT NULL,
+    "dcf" BIGINT NOT NULL,
     "reportUrl" TEXT,
     "reportHash" TEXT NOT NULL,
-    "poolPercentage" REAL NOT NULL,
+    "poolPercentageBps" INTEGER NOT NULL,
     "rightsPool" BIGINT NOT NULL,
-    "perToken" REAL NOT NULL,
+    "perTokenBaseUnits" BIGINT NOT NULL,
+    "snapshotJson" TEXT,
     "status" TEXT NOT NULL DEFAULT 'DRAFT',
     "snapshotSlot" BIGINT,
     "totalAllocated" BIGINT,
@@ -71,6 +73,16 @@ CREATE TABLE "Allocation" (
     "txSignature" TEXT,
     CONSTRAINT "Allocation_distributionId_fkey" FOREIGN KEY ("distributionId") REFERENCES "Distribution" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Allocation_participantId_fkey" FOREIGN KEY ("participantId") REFERENCES "Participant" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "IssuancePreview" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "termsJson" TEXT NOT NULL,
+    "derivedJson" TEXT NOT NULL,
+    "usedAt" DATETIME,
+    "issuanceId" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- CreateIndex
