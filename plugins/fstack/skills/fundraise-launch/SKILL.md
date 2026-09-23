@@ -44,7 +44,9 @@ DCF, but show your working and let them confirm the number.
 
 ## Step 2 / 4: Preview
 
-Call `fundraise_preview_issuance` with the terms. Keep the returned `previewId`. Then show:
+Call `fundraise_preview_issuance` with the terms. Keep the returned `previewId`.
+
+Write the whole preview below as visible text (the tables, not a summary). Show:
 
 **How the price is derived** (from `pricing.derivation`: one row per step)
 
@@ -81,8 +83,11 @@ Ask exactly one question:
 > This will create the `<symbol>` token and its Meteora market on-chain (Demo custody, devnet).
 > Create it? (yes / change something)
 
-- Only a clear yes ("yes", "go", "create it", or a yes given upfront in the founder's request
-  *for these terms*) proceeds. Anything else: ask what to change, go back to Step 1, preview again.
+- **End your turn here and wait for the founder's reply.** A "yes" written before the founder has seen
+  this preview (e.g. "launch it, yes" in the first message) does not count: the founder has not seen
+  the derived price, economics or agreement hash yet. Say "You said yes upfront; please confirm now that
+  you've seen the numbers."
+- Only a clear yes given after the preview ("yes", "go", "create it") proceeds. Anything else: ask what to change, go back to Step 1, preview again.
 - If the founder changes any term, you must call `fundraise_preview_issuance` again and use the new
   `previewId`. Never reuse a previewId for different terms.
 
