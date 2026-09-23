@@ -27,6 +27,8 @@ import {
   buildCurveWithCustomSqrtPrices,
   buildCurveWithMarketCap,
   getSqrtPriceFromPrice,
+  DAMM_V2_MIGRATION_FEE_ADDRESS,
+  deriveDammV2PoolAddress,
   deriveDbcPoolAddress,
   deriveDbcPoolAuthority,
   getCurrentPoint,
@@ -267,6 +269,7 @@ export async function buildSwapTransaction(
   side: "BUY" | "SELL",
   amountIn: bigint,
   minAmountOut: bigint,
+  opts: { partialFill?: boolean } = {},
 ): Promise<Transaction> {
   const { connection, allowlistProgram } = env;
   const svc = new HookPoolService(connection, COMMITMENT);
@@ -279,7 +282,7 @@ export async function buildSwapTransaction(
     payer: owner,
     pool,
     swapBaseForQuote: side === "SELL",
-    swapMode: SwapMode.ExactIn,
+    swapMode: opts.partialFill ? SwapMode.PartialFill : SwapMode.ExactIn,
     amountIn: new BN(amountIn.toString()),
     minimumAmountOut: new BN(minAmountOut.toString()),
     referralTokenAccount: null,
@@ -306,6 +309,8 @@ export interface PoolReading {
   partnerQuoteFee: bigint;
   tokenDecimals: number;
   activationType: number;
+  /** DAMM v2 pool address (derived) once migrated. */
+  dammPool?: PublicKey;
 }
 
 type AnyPool = Awaited<ReturnType<DynamicBondingCurveClient["state"]["getPool"]>>;
@@ -341,6 +346,14 @@ export async function readPool(env: DevnetEnv, pool: PublicKey): Promise<PoolRea
     partnerQuoteFee: big(s.partnerQuoteFee),
     tokenDecimals,
     activationType: Number((c as unknown as { activationType: number }).activationType),
+    dammPool:
+      Number(s.isMigrated) === 1
+        ? deriveDammV2PoolAddress(
+            DAMM_V2_MIGRATION_FEE_ADDRESS[Number((c as unknown as { migrationFeeOption: number }).migrationFeeOption)],
+            s.baseMint as PublicKey,
+            (c as unknown as { quoteMint: PublicKey }).quoteMint,
+          )
+        : undefined,
   };
 }
 

@@ -83,6 +83,7 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
           migrationQuoteThreshold: s.migrationQuoteThreshold,
           progressBps: s.isMigrated ? 10_000 : progressBps,
           isMigrated: s.isMigrated,
+          dammPool: s.dammPool?.toBase58(),
           accruedFees: { creator: s.creatorQuoteFee, partner: s.partnerQuoteFee },
         };
       },
