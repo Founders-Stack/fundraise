@@ -134,7 +134,7 @@ export function createFakePorts(): ChainPorts {
         const fee = amountIn / 100n;
         const net = amountIn - fee;
         const amountOut = side === "BUY" ? (net * 1_000_000n) / price : (net * price) / 1_000_000n;
-        return { side, amountIn, amountOut, price, priceImpactBps: 50, poolFee: fee, networkFeeLamports: 5000n };
+        return { side, amountIn, amountOut, price, priceImpactBps: 50, poolFee: fee, protocolFee: fee / 5n, networkFeeLamports: 5000n };
       },
       async buildSwapTx() {
         return { tx: Buffer.from("fake-unsigned-tx").toString("base64") };

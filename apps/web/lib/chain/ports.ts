@@ -51,7 +51,10 @@ export interface SwapQuote {
   amountOut: bigint;
   price: bigint;
   priceImpactBps: number;
+  /** Total fee the trader pays, USDC base units (trading fee + Meteora protocol fee). */
   poolFee: bigint;
+  /** Meteora's protocol share of poolFee (not split between startup and Founder Stack). */
+  protocolFee: bigint;
   /** Estimated network fee in lamports. */
   networkFeeLamports: bigint;
 }

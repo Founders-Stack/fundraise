@@ -303,7 +303,9 @@ export async function quoteView(id: string, sideRaw: unknown, amountIn: bigint) 
   const chain = await getChain();
   const q = await chain.market.quote(dbcPool, side, amountIn);
   const m = monetizationOf(issuance);
-  const fsFee = (q.poolFee * BigInt(m.dbcTradingFees.partnerPct)) / 100n;
+  // Meteora keeps its protocol share; only the remaining trading fee is split startup / Founder Stack.
+  const tradingFee = q.poolFee - q.protocolFee;
+  const fsFee = (tradingFee * BigInt(m.dbcTradingFees.partnerPct)) / 100n;
   const token = (a: bigint) => ({ baseUnits: a, amount: formatUnits(a, TOKEN_DECIMALS), display: `${tokenDisplay(a, TOKEN_DECIMALS)} ${issuance.symbol}` });
   const pay = side === "BUY" ? { asset: "USDC", ...usdc(q.amountIn) } : { asset: issuance.symbol, ...token(q.amountIn) };
   const receive = side === "BUY" ? { asset: issuance.symbol, ...token(q.amountOut) } : { asset: "USDC", ...usdc(q.amountOut) };
@@ -317,8 +319,9 @@ export async function quoteView(id: string, sideRaw: unknown, amountIn: bigint) 
     priceImpact: pctDisplay(q.priceImpactBps),
     fees: {
       poolFee: usdc(q.poolFee),
-      startupShare: usdc(q.poolFee - fsFee),
-      founderStackFee: { ...usdc(fsFee), mode: m.mode, note: `${m.dbcTradingFees.partnerPct}% of the pool trading fee goes to Founder Stack (${m.mode})` },
+      meteoraProtocolFee: usdc(q.protocolFee),
+      startupShare: usdc(tradingFee - fsFee),
+      founderStackFee: { ...usdc(fsFee), mode: m.mode, note: `${m.dbcTradingFees.partnerPct}% of the trading fee (after Meteora's protocol fee) goes to Founder Stack (${m.mode})` },
       networkFee: { lamports: q.networkFeeLamports, sol: formatUnits(q.networkFeeLamports, 9) },
     },
     raw: q,

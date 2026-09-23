@@ -135,7 +135,8 @@ Tokens in DBC vaults, DAMM pools, LP positions or unregistered wallets are **una
 - The snapshot is taken at execution time and stores `slot` plus the full holder list. It is immutable once created, because RPC can't return historical balances.
 
 **R4: Eligibility.**
-- Only allowlisted wallets can receive tokens (enforced by the hook, section 4). The DBC pool authority is allowlisted as infrastructure and treated as unallocated.
+- Before graduation, only allowlisted wallets can receive tokens (enforced by the hook, section 4). The DBC pool authority is allowlisted as infrastructure and treated as unallocated.
+- DBC removes the transfer hook at graduation (V10). After that, anyone can hold tokens, and only registered participants are paid; everything else counts as unallocated.
 - If the hook is dropped (fallback), unregistered holders count as unallocated and the UI flags them.
 
 **R5: Rounding.** Floor to USDC base units (6 dp). Dust goes to unallocated.
@@ -354,6 +355,9 @@ Split screen: **terminal (founder) | browser (investors)**.
 | V4 | 50/50 trading fees are expressible | ✅ `creatorTradingFeePercentage` 0–100 |
 | V5 | Market-cap-driven curve building | ✅ `buildCurveWithMarketCap({ initialMarketCap, migrationMarketCap })` |
 | V6 | Stock-paired pool requirement applies to us | ❌ Clawpump bounty only. USDC quote is fine for Meteora |
+| V8 (H1–H4, H8) | Devnet DBC pool with Token-2022 + `fs_allowlist` hook; mock-USDC quote; allowlisted buy/sell OK; Carol's buy fails with `NotEligible`; start price $1.00 | ✅ Signatures in `docs/spike-results.md`. The SDK's `buildCurveWithMarketCap` fails for $1M→$3M with 6 decimals, so we use `buildCurveWithMarketCapRobust` (explicit prices). DBC doesn't call the hook at pool creation: we initialize the allowlist right after and pass the extra accounts explicitly |
+| V9 (H6) | Holder listing via `getProgramAccounts` | ⚠️ The public devnet RPC excludes Token-2022. Fallback: read balances of allowlisted wallets + the pool vault. A Helius-type RPC restores the full scan |
+| V10 (H5) | Hook pool migrates to DAMM v2 | ✅ Migration works, but **DBC strips the transfer hook at graduation**, so eligibility is enforced only before graduation. After that, non-registered holders are unallocated at snapshot (R4) |
 | V7 (H9) | Same SKILL.md + MCP server work in Claude Code and Codex | ✅ Both pass (`scripts/agent-smoke/run.sh`). Claude tool names are `mcp__plugin_fstack_fstack__<tool>`; Codex invokes `$fstack-<name>` via `.agents/skills` symlinks. Rules in `docs/agent-install.md` |
 
 ### To validate in code (timeboxed, in order)

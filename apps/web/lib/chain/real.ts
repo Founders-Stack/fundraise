@@ -102,6 +102,7 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
           priceImpactBps: impact,
           // collectFeeMode = QuoteToken: the whole fee (trading + Meteora protocol share) is in USDC for BUY and SELL.
           poolFee: q.tradingFee + q.protocolFee,
+          protocolFee: q.protocolFee,
           networkFeeLamports: SWAP_NETWORK_FEE_LAMPORTS,
         };
       },

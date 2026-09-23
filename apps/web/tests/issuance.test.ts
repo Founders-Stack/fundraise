@@ -217,9 +217,13 @@ describe("market", () => {
     expect(res.status).toBe(200);
     expect(q.pay.asset).toBe("USDC");
     expect(q.receive.asset).toBe("ACME");
-    expect(BigInt(q.fees.startupShare.baseUnits) + BigInt(q.fees.founderStackFee.baseUnits)).toBe(
-      BigInt(q.fees.poolFee.baseUnits),
-    );
+    // Meteora's protocol fee + startup share + Founder Stack share = total pool fee.
+    expect(
+      BigInt(q.fees.meteoraProtocolFee.baseUnits) +
+        BigInt(q.fees.startupShare.baseUnits) +
+        BigInt(q.fees.founderStackFee.baseUnits),
+    ).toBe(BigInt(q.fees.poolFee.baseUnits));
+    expect(BigInt(q.fees.meteoraProtocolFee.baseUnits)).toBeGreaterThan(0n);
     expect(q.fees.networkFee.lamports).toBeTruthy();
     const bad = await quoteGET(new Request("http://test/q?side=HOLD&amountIn=1"), ctx(issuanceId));
     expect(bad.status).toBe(400);
