@@ -49,7 +49,7 @@ export interface CurveInput {
   graduationMarketCap: bigint; // USDC base units
   fees: DbcFeeParams;
   creatorLockedLiquidityPercentage: number;
-  /** Anti-sniper decaying base fee. Defaults: 10% -> 1% over 5 minutes. */
+  /** Anti-sniper decaying base fee. Defaults: 3% -> 1% over 5 minutes. */
   feeSchedule?: { startingFeeBps: number; endingFeeBps: number; numberOfPeriod: number; totalDurationSec: number };
 }
 
@@ -57,7 +57,7 @@ const QUOTE_DECIMALS = 6;
 const usdc = (v: bigint) => Number(v) / 10 ** QUOTE_DECIMALS;
 
 export function buildCurveParams(input: CurveInput): { params: BuildCurveWithMarketCapParams; config: ConfigParameters } {
-  const sched = input.feeSchedule ?? { startingFeeBps: 1000, endingFeeBps: 100, numberOfPeriod: 10, totalDurationSec: 300 };
+  const sched = input.feeSchedule ?? { startingFeeBps: 300, endingFeeBps: 100, numberOfPeriod: 10, totalDurationSec: 300 };
   const creatorLocked = input.creatorLockedLiquidityPercentage;
   const params: BuildCurveWithMarketCapParams = {
     token: {

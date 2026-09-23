@@ -251,7 +251,7 @@ Market cap here means token supply × token price, not company value (R6).
 | `MonetizationConfig.graduation` | `migrationFeeOption` = 6 (Customizable), `migrationFee.{feePercentage, creatorFeePercentage}` | DEMO_PROTOCOL → 50 / 96 ⇒ 48% issuer, 2% FS, 50% liquidity |
 | `MonetizationConfig.dbcTradingFees` | `creatorTradingFeePercentage` | 50 |
 | Post-graduation LP | `creatorLockedLiquidityPercentage` | 100 (issuer LP locked; FS owns none) |
-| Launch protection | base fee scheduler (decaying) | high start fee decaying over minutes, anti-sniper |
+| Launch protection | base fee scheduler (decaying) | 3% at launch, decaying exponentially to 1% over 5 minutes (anti-sniper) |
 
 **Originality pitch to Meteora:**
 1. The bonding curve starts at a yield-implied price, not an arbitrary memecoin market cap.
