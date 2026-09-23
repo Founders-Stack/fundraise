@@ -183,7 +183,13 @@ async function pollUntilFinal(
   lastValidBlockHeight: number,
 ): Promise<{ status: "confirmed" } | { status: "failed"; err: unknown } | { status: "expired" }> {
   let i = 0;
+  const deadline = Date.now() + 4 * 60_000;
   for (;;) {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `OUTCOME UNKNOWN for ${sig}: RPC unreachable while confirming. Check the signature on an explorer before retrying.`,
+      );
+    }
     await sleep(i < 5 ? 1500 : 3000);
     i++;
     const st = await withRetry(() => connection.getSignatureStatus(sig, { searchTransactionHistory: true })).catch(
