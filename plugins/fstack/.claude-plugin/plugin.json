@@ -1,0 +1,7 @@
+{
+  "name": "fstack",
+  "version": "0.1.0",
+  "description": "Founder Stack /capital: raise against a share of future distributable cash flow from Claude Code (Cash Flow Rights on Solana + Meteora DBC).",
+  "author": { "name": "Founder Stack" },
+  "keywords": ["fundraise", "solana", "meteora", "cash-flow-rights"]
+}

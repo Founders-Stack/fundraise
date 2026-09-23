@@ -1,0 +1,30 @@
+[package]
+name = "fs_allowlist"
+version = "0.1.0"
+description = "Founder Stack allowlist transfer hook (Token-2022)"
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "fs_allowlist"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = { version = "=1.1.2", features = ["init-if-needed"] }
+anchor-spl = { version = "=1.1.2", default-features = false, features = ["token", "token_2022", "token_2022_extensions"] }
+spl-transfer-hook-interface = "2"
+spl-tlv-account-resolution = "0.11"
+spl-discriminator = "0.5"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

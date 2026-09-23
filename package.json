@@ -1,0 +1,14 @@
+{
+  "name": "fstack-stocklana",
+  "private": true,
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "test": "pnpm -r test",
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter @fstack/mcp build && pnpm --filter web build",
+    "build:web": "pnpm --filter web build",
+    "build:mcp": "pnpm --filter @fstack/mcp build",
+    "db:migrate": "pnpm --filter web db:migrate",
+    "mcp": "node packages/fstack-mcp/dist/index.js"
+  }
+}

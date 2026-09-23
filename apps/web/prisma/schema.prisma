@@ -1,0 +1,103 @@
+// SPEC section 3 data model. SQLite for the hackathon (Postgres if deployed).
+// SQLite has no enums/Json: enums are String (values documented inline),
+// JSON-ish fields (dbcConfig, monetization) are String holding JSON.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Issuance {
+  id                    String   @id @default(cuid())
+  issuerName            String
+  rightsType            String   @default("CASH_FLOW") // CASH_FLOW | VENTURE_EXIT (future)
+  poolPercentage        Float    // e.g. 0.10 = 10% of DCF
+  tokenSupply           BigInt   // whole tokens, e.g. 1_000_000
+  symbol                String
+  name                  String
+  distributionFrequency String   @default("QUARTERLY") // QUARTERLY | MONTHLY
+  nextRecordDate        DateTime?
+
+  // curve inputs (SPEC section 5)
+  expectedAnnualDcf     Float
+  targetInitialYield    Float
+
+  agreementVersion      String
+  agreementHash         String
+  agreementText         String
+
+  // derived, stored
+  startingMarketCap     Float
+  graduationMarketCap   Float
+
+  quoteMint             String?
+  baseMint              String?
+  dbcConfig             String?  // JSON: DBC config pubkey + params
+  dbcPool               String?
+  dammPool              String?
+  monetization          String   // JSON: MonetizationConfig
+
+  createdAt             DateTime @default(now())
+
+  participants  Participant[]
+  distributions Distribution[]
+}
+
+model Participant {
+  id                  String    @id @default(cuid())
+  issuanceId          String
+  issuance            Issuance  @relation(fields: [issuanceId], references: [id], onDelete: Cascade)
+  wallet              String
+  displayName         String?
+  verifiedAt          DateTime?
+  eligibleAt          DateTime?
+  agreementAcceptedAt DateTime?
+  agreementSig        String?
+  allowlistTx         String?
+  createdAt           DateTime  @default(now())
+
+  allocations Allocation[]
+
+  @@unique([issuanceId, wallet])
+}
+
+model Distribution {
+  id             String    @id @default(cuid())
+  issuanceId     String
+  issuance       Issuance  @relation(fields: [issuanceId], references: [id], onDelete: Cascade)
+  periodLabel    String    // e.g. 2026-Q3
+  dcf            Float     // issuer-reported distributable cash flow (USD)
+  reportUrl      String?
+  reportHash     String    // sha256 of report JSON
+  poolPercentage Float
+  rightsPool     BigInt    // USDC base units (6 dp)
+  perToken       Float     // USDC per whole token
+  status         String    @default("DRAFT") // DRAFT | SNAPSHOTTED | EXECUTED
+  snapshotSlot   BigInt?
+  totalAllocated BigInt?   // USDC base units
+  unallocated    BigInt?   // USDC base units
+  executedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  allocations Allocation[]
+
+  @@unique([issuanceId, periodLabel])
+}
+
+model Allocation {
+  id             String       @id @default(cuid())
+  distributionId String
+  distribution   Distribution @relation(fields: [distributionId], references: [id], onDelete: Cascade)
+  wallet         String
+  participantId  String?
+  participant    Participant? @relation(fields: [participantId], references: [id])
+  tokens         BigInt       // token base units
+  payout         BigInt       // USDC base units
+  txSignature    String?
+
+  @@unique([distributionId, wallet])
+}

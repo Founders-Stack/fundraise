@@ -1,0 +1,16 @@
+node_modules
+.next
+dist
+target
+.anchor
+.env
+.env.local
+*.db
+*.db-journal
+keys/
+test-ledger
+
+.DS_Store
+.env.*
+!.env.example
+apps/web/.env
