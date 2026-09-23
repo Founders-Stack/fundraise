@@ -331,7 +331,7 @@ Company: **Acme SaaS**. Terms: 10% of quarterly DCF, 1,000,000 ACME-CF.
 
 Split screen: **terminal (founder) | browser (investors)**.
 
-1. **Launch, in Claude Code.** The founder types `/fstack:fundraise` "we're Acme SaaS, raise against 10% of quarterly cash flow". The skill interviews them. The preview shows expected DCF $1.6M/yr and 16% target yield → $1.00/token, 48/2/50, 50/50 and the agreement hash. The founder says "yes" and gets back the market URL + investor link.
+1. **Launch, in Claude Code.** The founder types `/fstack:fundraise` "we're Acme SaaS, raise against 10% of quarterly cash flow". The skill interviews them. The preview shows expected DCF $1.6M/yr and 16% target yield → $1.00/token, 48/2/50, 50/50 and the agreement hash. The founder says "yes" and gets back the market URL + investor link. The skill always stops after the preview, and a "yes" given before the preview doesn't count, so this step always takes two turns.
 2. **Hook moment, in the browser.** Carol (not onboarded) tries to buy and the transaction fails with `NotEligible`.
 3. **Buy, in the browser.** Alice onboards and buys 100k ACME-CF.
 4. **Q3, in Codex** (same skills, second agent, ~10s). The founder runs `/fstack:fundraise` "Q3 closed, numbers are in ./finance/q3.csv". The agent reads the CSV and proposes $400k DCF with its working shown. The founder confirms, and `fundraise-distribute` previews a $40k pool, $0.04/token, Alice $4,000, the rest unallocated. The founder types the total and the signatures print.
