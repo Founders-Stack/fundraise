@@ -16,9 +16,27 @@
 //!       AccountData(account_index = 2, offset 32, len 32) // destination token account owner
 //!   ])
 //!
+//! Meteora DBC integration (verified against MeteoraAg/dynamic-bonding-curve source):
+//! - `initialize_virtual_pool_with_token2022_transfer_hook` creates the base mint with
+//!   `TransferHook { authority: pool_authority, program_id: <this program> }` and MINTS the
+//!   whole supply into the base vault (MintTo does not invoke the hook). DBC never CPIs into
+//!   this program during pool creation, so `initialize` is a separate transaction sent by the
+//!   Founder Stack authority right after the pool exists (it only needs the mint to exist).
+//! - Swaps (`swap2_with_transfer_hook`) forward the extra accounts to Token-2022 through
+//!   `add_extra_accounts_for_execute_cpi`, which resolves our AccountData seed on-chain.
+//!   NOTE: the DBC SDK's client-side resolver passes PublicKey.default as the destination,
+//!   so it can't resolve an AccountData seed; clients must pass
+//!   [AllowEntry(dest owner), this program, ExtraAccountMetaList] themselves.
+//! - At curve completion DBC revokes the transfer hook (program id -> None, authority -> None)
+//!   so the pool can migrate to DAMM v2. Allowlist enforcement therefore ends at graduation.
+//!
 //! Operational note: after a Meteora DBC pool is created, the admin MUST call
 //! `add_allow(pool_authority)` (the DBC pool-authority PDA owns the base vault),
 //! otherwise sells into the pool fail with `NotEligible`. No special-casing here.
+//!
+//! Hardening: `initialize` must be signed by `FS_AUTHORITY` (hardcoded) so nobody can
+//! front-run the Config/ExtraAccountMetaList creation for a freshly created mint and take
+//! over its allowlist admin.
 
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
@@ -41,11 +59,16 @@ pub const CONFIG_SEED: &[u8] = b"config";
 pub const ALLOW_SEED: &[u8] = b"allow";
 pub const EXTRA_METAS_SEED: &[u8] = b"extra-account-metas";
 
+/// Founder Stack authority (devnet: keys/fs-authority.json). Only this key may initialize
+/// a mint's allowlist Config + ExtraAccountMetaList.
+pub const FS_AUTHORITY: Pubkey = pubkey!("947L5j9d55jFGNyCSwguX8PHTDb5VNyidvRhy7UPDtUB");
+
 #[program]
 pub mod fs_allowlist {
     use super::*;
 
     /// Creates the Config PDA and the ExtraAccountMetaList for `mint`.
+    /// Must be signed by `FS_AUTHORITY`.
     pub fn initialize(ctx: Context<Initialize>, admin: Pubkey) -> Result<()> {
         let config = &mut ctx.accounts.config;
         config.mint = ctx.accounts.mint.key();
@@ -168,6 +191,8 @@ pub fn extra_account_metas() -> Result<Vec<ExtraAccountMeta>> {
 pub struct Initialize<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
+    #[account(address = FS_AUTHORITY @ AllowlistError::Unauthorized)]
+    pub authority: Signer<'info>,
     pub mint: InterfaceAccount<'info, Mint>,
     #[account(
         init,
