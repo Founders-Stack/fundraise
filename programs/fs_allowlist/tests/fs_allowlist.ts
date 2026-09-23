@@ -44,6 +44,19 @@ describe("fs_allowlist", () => {
 
   const mint = Keypair.generate();
   const admin = Keypair.generate();
+  // Must match FS_AUTHORITY in lib.rs (devnet: /Users/kastet/FS-Stocklana/keys/fs-authority.json).
+  const fsAuthority = Keypair.fromSecretKey(
+    Uint8Array.from(
+      JSON.parse(
+        fs.readFileSync(
+          process.env.FS_AUTHORITY_KEYPAIR ??
+            "/Users/kastet/FS-Stocklana/keys/fs-authority.json",
+          "utf8"
+        )
+      )
+    )
+  );
+  const impostor = Keypair.generate();
   const alice = Keypair.generate();
   const carol = Keypair.generate();
 
@@ -146,16 +159,36 @@ describe("fs_allowlist", () => {
     await sendAndConfirmTransaction(connection, tx, [payer, mint]);
   });
 
+  it("initialize by a non-FS-authority fails with Unauthorized", async () => {
+    await expectError(
+      program.methods
+        .initialize(impostor.publicKey)
+        .accountsPartial({
+          payer: payer.publicKey,
+          authority: impostor.publicKey,
+          mint: mint.publicKey,
+          config: configPda,
+          extraAccountMetaList: extraMetasPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([impostor])
+        .rpc(),
+      "Unauthorized"
+    );
+  });
+
   it("initialize creates config + extra account meta list", async () => {
     await program.methods
       .initialize(admin.publicKey)
       .accountsPartial({
         payer: payer.publicKey,
+        authority: fsAuthority.publicKey,
         mint: mint.publicKey,
         config: configPda,
         extraAccountMetaList: extraMetasPda,
         systemProgram: SystemProgram.programId,
       })
+      .signers([fsAuthority])
       .rpc();
     const cfg: any = await (program.account as any).config.fetch(configPda);
     assert.ok(cfg.admin.equals(admin.publicKey));
@@ -229,7 +262,7 @@ describe("fs_allowlist", () => {
       })
       .signers([admin])
       .rpc();
-    await expectError(transfer(alice.publicKey), "NotEligible");
+    await expectError(transfer(alice.publicKey, 1_000_001n), "NotEligible");
   });
 
   it("re-add alice -> transfer succeeds again", async () => {
@@ -242,13 +275,13 @@ describe("fs_allowlist", () => {
       })
       .signers([admin])
       .rpc();
-    await transfer(alice.publicKey);
+    await transfer(alice.publicKey, 1_000_002n);
     const acc = await getAccount(
       connection,
       ata(alice.publicKey),
       "confirmed",
       TOKEN_2022_PROGRAM_ID
     );
-    assert.equal(acc.amount, 2_000_000n);
+    assert.equal(acc.amount, 2_000_002n);
   });
 });
