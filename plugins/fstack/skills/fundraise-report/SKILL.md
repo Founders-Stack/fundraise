@@ -42,7 +42,8 @@ rights pool and per-unit amount computed by the API. No money moves here; `fundr
    yes. If they correct the number, use theirs. Optionally ask for a public report URL (`reportUrl`).
 6. **Record it.** Call `fundraise_report_period` with `issuanceId`, `periodLabel`, `dcf` as a USDC decimal
    string (e.g. `"400000"`, never base units) and `reportUrl` if given.
-7. **Show the API's result**, not your own math: period, DCF (`display.dcf`), pool percentage, **rights pool**
+7. **Show the API's result** together with the DCF working table from step 4 (so the founder can verify it
+   in the same message), not your own math for the pool: period, DCF (`display.dcf`), pool percentage, **rights pool**
    (`display.rightsPool`), **per unit** (`display.perToken`), `reportHash`, status DRAFT, and the
    `distribution.id`. Then offer the next step: "Run `/fstack:fundraise-distribute` (Codex:
    `$fstack-fundraise-distribute`) to snapshot holders and preview payouts."

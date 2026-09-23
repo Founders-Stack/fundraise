@@ -25,3 +25,14 @@ less debits 910,000 (payroll 603,000, AWS 84,000, software 19,500, rent 36,000, 
 118,500 (tax 35,000, debt service 9,500, capex 24,000, reserve 50,000) → **450,000**.
 
 With 10% of DCF and 1,000,000 units: Q3 rights pool 40,000 (0.04 / unit), Q4 rights pool 45,000 (0.045 / unit).
+
+## H11 run (2026-09-24, CHAIN_MODE=fake, Claude Code `-p`)
+
+`cd apps/web && pnpm exec tsx ../../demo/finance/seed-h11.ts` creates three fresh Acme issuances; then, per file:
+`claude -p --plugin-dir ./plugins/fstack --allowedTools="mcp__plugin_fstack_fstack__*,Read" -- "/fstack:fundraise-report Use issuance id <id>. <period> closed; the numbers are in ./demo/finance/<file>. ..."`
+
+| File | Proposed DCF | Match | Recorded rights pool / per unit |
+|---|---|---|---|
+| `q3-2026.csv` | 400,000 | yes (2/2 runs) | 40,000 / 0.04 |
+| `q3-2026-bank.csv` | 400,000 | yes (2/2 runs) | 40,000 / 0.04 |
+| `q4-2026.csv` | 450,000 | yes (2/2 runs) | 45,000 / 0.045 |
