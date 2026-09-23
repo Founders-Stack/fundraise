@@ -24,8 +24,11 @@ export function formatUnits(amount: bigint, decimals: number = USDC_DECIMALS): s
 
 /** "$1,600,000" / "$0.04" style display string for USDC base units (floored to cents unless < $0.01 precision matters). */
 export function usdDisplay(amount: bigint): string {
-  const s = formatUnits(amount, USDC_DECIMALS);
-  const [whole, frac] = s.replace("-", "").split(".");
+  const abs = amount < 0n ? -amount : amount;
+  // >= $0.01: floor to cents; sub-cent amounts keep full 6-dp precision.
+  const shown = abs >= 10_000n ? (abs / 10_000n) * 10_000n : abs;
+  const s = formatUnits(shown, USDC_DECIMALS);
+  const [whole, frac] = s.split(".");
   const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   const cents = frac ? (frac.length === 1 ? frac + "0" : frac) : "";
   return `${amount < 0n ? "-" : ""}$${grouped}${cents ? "." + cents : ""}`;

@@ -129,6 +129,8 @@ export const periodsPerYear = (freq: string) => (freq === "MONTHLY" ? 12 : 4);
 
 // ---------------------------------------------------------------- derivation
 
+const bigintReplacer = (_k: string, v: unknown) => (typeof v === "bigint" ? v.toString() : v);
+
 function serializeTerms(i: PreviewInput) {
   return JSON.stringify(
     { terms: i.terms, graduationMultiple: i.graduationMultiple, monetization: i.monetization },
@@ -347,7 +349,7 @@ export async function completeIssuanceCreation(issuance: Issuance, input: Previe
           dbcParams: res.dbcParams,
           signatures: res.signatures,
           chainMode: chain.mode,
-        }),
+        }, bigintReplacer),
       },
     });
   } catch (e) {
