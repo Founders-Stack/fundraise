@@ -19,6 +19,10 @@ the server just **forwards your bearer token** and returns the API's JSON.
 | Tool | API | Mutates |
 |---|---|---|
 | `fundraise_list_issuances` | `GET /api/issuances` | — |
+| `fundraise_preview_issuance` | `POST /api/issuances/preview` | — (stores a one-time `previewId`) |
+| `fundraise_create_issuance` | `POST /api/issuances` `{ previewId }` | ✅ on-chain (mint + hook + DBC pool) |
+| `fundraise_get_market` | `GET /api/issuances/:id/market` | — |
+| `fundraise_list_holders` | `GET /api/issuances/:id/holders` | — |
 | `fundraise_report_period` | `POST /api/issuances/:id/distributions` `{ periodLabel, dcf, reportUrl? }` | DB (DRAFT) |
 | `fundraise_list_distributions` | `GET /api/issuances/:id/distributions` (public) | — |
 | `fundraise_snapshot` | `POST /api/distributions/:id/snapshot` | DB (preview + `confirmTotal`) |
@@ -29,8 +33,10 @@ Distribution amounts (`dcf`, `confirmTotal`) are USDC **decimal strings** (`"400
 base units. `confirmTotal` must be the exact total the founder typed; the API rejects any mismatch, so an
 agent can't skip the preview. Executing twice is a no-op; retrying after a partial failure pays only unpaid rows.
 
-More tools (preview/create issuance, market, holders, report, snapshot, execute) land in
-later tasks; see SPEC section 0.3.
+Read tools carry `readOnlyHint: true`. `fundraise_preview_issuance` takes `expectedAnnualDcf` as a USDC
+**decimal string** (`"1600000"` = $1.6M) and rates in basis points (`poolPercentageBps: 1000` = 10%).
+`fundraise_create_issuance` is gated server-side: a missing/unknown `previewId` → `400`, a reused one → `409`.
+All money in responses is `{ baseUnits, usdc, display }` (USDC 6 dp).
 
 Errors come back as `isError: true` with `{ error, status, body }` so the calling skill can
 stop and show the message (e.g. `401` → check `FS_API_TOKEN`).
