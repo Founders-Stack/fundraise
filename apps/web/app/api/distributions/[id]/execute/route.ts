@@ -1,5 +1,6 @@
 import { requireIssuer } from "@/lib/auth";
 import { json } from "@/lib/json";
+import { handle, readJson } from "@/lib/server/http";
 import { executeDistribution } from "@/lib/server/distribution";
 
 export const dynamic = "force-dynamic";
@@ -10,8 +11,8 @@ export const maxDuration = 60;
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const denied = requireIssuer(req);
   if (denied) return denied;
-  const { id } = await ctx.params;
-  const body = await req.json().catch(() => null);
-  const r = await executeDistribution(id, body);
-  return json(r.body, { status: r.status });
+  return handle(async () => {
+    const { id } = await ctx.params;
+    return json(await executeDistribution(id, await readJson(req)));
+  });
 }

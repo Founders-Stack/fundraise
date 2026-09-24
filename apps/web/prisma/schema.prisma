@@ -83,6 +83,7 @@ model Distribution {
   totalAllocated BigInt?   // USDC base units
   unallocated    BigInt?   // USDC base units
   executedAt     DateTime?
+  executingUntil DateTime? // execution lease: set atomically by execute, cleared when it finishes
   createdAt      DateTime  @default(now())
 
   allocations Allocation[]

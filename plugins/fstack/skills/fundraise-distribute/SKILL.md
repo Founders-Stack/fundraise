@@ -38,11 +38,17 @@ Snapshot → preview → founder types the total → execute → signatures. Thi
 
 ## Errors
 
-- `400 confirm_total_mismatch`: the typed total differs from the snapshot; re-show the preview, ask again.
+Errors are `{ error, message, details }`; the fields below are under `details`.
+
+- `400 confirm_total_mismatch`: the typed total differs from the snapshot (or the snapshot was re-taken since
+  the preview); re-show the preview, ask again.
 - `409 insufficient_balance`: show `balance`, `required`, `shortfall`; the founder funds the wallet, then retry.
 - `502 partial_execution`: some batches were paid and recorded. Show `newSignatures`, then retry
   `fundraise_execute_distribution` with the **same** confirmTotal; only unpaid holders are paid.
+- `409 execution_in_progress`: another execute of this distribution is running. Wait a minute, then call
+  `fundraise_get_distribution` to see what was paid; never snapshot again while it runs.
 - `409 not_snapshotted`: run step 2. `409 already_executed` on snapshot: the period is done; show history.
+  `409 payout_in_progress` on snapshot: some holders were already paid; retry execute instead.
 - Calling execute again after success is a no-op (`alreadyExecuted: true`); nothing is paid twice.
 
 ## Rules

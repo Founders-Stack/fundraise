@@ -1,5 +1,6 @@
 import { requireIssuer } from "@/lib/auth";
 import { json } from "@/lib/json";
+import { handle } from "@/lib/server/http";
 import { snapshotDistribution } from "@/lib/server/distribution";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +9,8 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const denied = requireIssuer(req);
   if (denied) return denied;
-  const { id } = await ctx.params;
-  const r = await snapshotDistribution(id);
-  return json(r.body, { status: r.status });
+  return handle(async () => {
+    const { id } = await ctx.params;
+    return json(await snapshotDistribution(id));
+  });
 }
