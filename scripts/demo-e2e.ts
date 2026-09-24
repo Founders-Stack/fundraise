@@ -16,6 +16,17 @@
 // Env (all optional):
 //   PORT           dev server port to use/start (default 3123)
 //   FS_API_TOKEN   issuer bearer token (default "dev-local-token", matches scripts/agent-smoke)
+//   DEMO_SCALE     scales supply, DCF, buys and payouts (default 1 = pitch example, 1,000,000 supply).
+//                  DEMO_SCALE=0.001 is the mainnet pilot (SPEC section 10): 1,000 supply, Alice buys
+//                  100, payouts $4.00 / $2.70 / $1.80. Per-token prices, payouts and yields are unchanged.
+//
+// --dry-run  (A29): does NOT start a server or run the HTTP flow. Against the configured cluster
+//   (SOLANA_CLUSTER, RPC_URL, QUOTE_MINT, FS_ALLOWLIST_PROGRAM_ID, FS_AUTHORITY_KEYPAIR, ISSUER_KEYPAIR)
+//   it derives the pilot-scale pool (terms -> pricing -> DBC curve), checks the graduation threshold
+//   sits far above the pilot buys, builds the exact createConfigAndPoolWithTransferHook tx and the
+//   fs_allowlist initialize + add_allow tx, and SIMULATES the first one (sigVerify off). Nothing is
+//   signed with a funded key and nothing is sent: the connection's send methods are disabled.
+//     DEMO_SCALE=0.001 scripts/chain/run.sh ../demo-e2e.ts --dry-run    (or see docs/mainnet-pilot.md)
 //
 // If nothing is listening on PORT, this script starts `next dev` itself (apps/web, CHAIN_MODE=fake)
 // against a throwaway SQLite file in the OS temp dir, and stops it on exit. If a server is ALREADY
@@ -38,6 +49,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { CLUSTERS, parseClusterName } from "../packages/core/src/cluster";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,6 +59,26 @@ const WEB_DIR = path.join(ROOT, "apps", "web");
 const PORT = Number(process.env.PORT) || 3123;
 const FS_API_TOKEN = process.env.FS_API_TOKEN || "dev-local-token";
 const BASE = `http://localhost:${PORT}/api`;
+
+const DRY_RUN = process.argv.includes("--dry-run");
+
+// ---- DEMO_SCALE (SPEC section 10): pitch example x scale. 0.001 = mainnet pilot.
+const DEMO_SCALE = Number(process.env.DEMO_SCALE ?? "1");
+const PITCH_SUPPLY = 1_000_000n;
+const SUPPLY = BigInt(Math.round(1_000_000 * DEMO_SCALE));
+if (!(DEMO_SCALE > 0 && DEMO_SCALE <= 1) || Number(SUPPLY) !== 1_000_000 * DEMO_SCALE) {
+  throw new Error(`DEMO_SCALE must be in (0, 1] and give a whole-token supply (e.g. 1, 0.01, 0.001); got ${process.env.DEMO_SCALE}`);
+}
+/** A whole-number pitch amount (tokens or whole USDC) at the current scale. Exact when divisible. */
+const sc = (pitch: bigint) => (pitch * SUPPLY) / PITCH_SUPPLY;
+/** A pitch USDC amount at scale, as the API's decimal string ("4000", "2.7"). */
+function scUsdc(pitchWhole: bigint): string {
+  const base = (pitchWhole * 1_000_000n * SUPPLY) / PITCH_SUPPLY;
+  const whole = base / 1_000_000n;
+  const frac = (base % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
+}
+const grouped = (n: bigint) => n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 const USDC_UNIT = 10n ** 6n;
 const TOKEN_UNIT = 10n ** 6n; // ACME-CF also has 6 decimals (SPEC section 5)
@@ -352,17 +384,18 @@ async function main() {
     const fakeSwap: (dbcPool: string, owner: string, side: "BUY" | "SELL", tokens: bigint) => { signature: string } =
       fakeChain.createFakeChain().control.swap;
     const agreementMessage = await import(pathToFileURL(path.join(WEB_DIR, "lib/server/agreement-message.ts")).href);
-    const agreementAcceptanceMessage: (hash: string, issuanceId: string) => string =
+    const agreementAcceptanceMessage: (p: { issuanceId: string; wallet: string; agreementHash: string }) => string =
       agreementMessage.agreementAcceptanceMessage;
 
     // ---- 1. Launch: preview ----
-    step("Launch, in Claude Code (simulated over HTTP): Acme SaaS, 10% of quarterly DCF, 1,000,000 ACME-CF");
+    step(`Launch, in Claude Code (simulated over HTTP): Acme SaaS, 10% of quarterly DCF, ${grouped(SUPPLY)} ACME-CF (DEMO_SCALE=${DEMO_SCALE})`);
     const previewBody = {
       issuerName: "Acme SaaS, Inc.",
       symbol: "ACME-CF",
       tokenName: "Acme SaaS Cash Flow Participation Unit",
       poolPercentageBps: 1000,
-      expectedAnnualDcf: "1600000", // $1.6M/yr
+      expectedAnnualDcf: sc(1_600_000n).toString(), // $1.6M/yr x scale
+      tokenSupply: SUPPLY.toString(),
       targetInitialYieldBps: 1600, // 16%
       distributionFrequency: "QUARTERLY",
     };
@@ -370,14 +403,14 @@ async function main() {
     assertEqual("preview status 201", preview.status, 201);
     previewId = preview.body.previewId;
     assertTrue("previewId issued", typeof previewId === "string" && previewId.length > 0);
-    assertEqual("expected annual rights pool = $160,000", preview.body.pricing.expectedAnnualRightsPool.baseUnits, "160000000000");
-    assertEqual("starting market cap = $1,000,000", preview.body.pricing.startingMarketCap.display, "$1,000,000");
+    assertEqual("expected annual rights pool = $160,000 x scale", preview.body.pricing.expectedAnnualRightsPool.baseUnits, (sc(160_000n) * USDC_UNIT).toString());
+    assertEqual("starting market cap = $1,000,000 x scale", preview.body.pricing.startingMarketCap.display, `$${grouped(sc(1_000_000n))}`);
     assertEqual("starting price ~= $1.00/token", preview.body.pricing.startingPricePerToken.baseUnits, "1000000");
-    assertEqual("graduation market cap = $3,000,000", preview.body.pricing.graduationMarketCap.display, "$3,000,000");
+    assertEqual("graduation market cap = $3,000,000 x scale", preview.body.pricing.graduationMarketCap.display, `$${grouped(sc(3_000_000n))}`);
     assertEqual("graduation split 48/2/50", preview.body.projectedGraduation.split, { issuerPct: 48, platformPct: 2, liquidityPct: 50 });
     assertEqual("trading fee split 50/50", preview.body.fees.tradingFeeSplit, { startupPct: 50, founderStackPct: 50 });
     assertTrue("agreement hash is a sha256 hex digest", /^[0-9a-f]{64}$/.test(preview.body.agreement.hash), preview.body.agreement.hash);
-    assertEqual("custody label", preview.body.custody, "Demo custody (devnet)");
+    assertEqual("custody label (lib/cluster)", preview.body.custody, CLUSTERS[parseClusterName(process.env.SOLANA_CLUSTER)].copy.custody);
     const agreementHash: string = preview.body.agreement.hash;
     console.log(`  preview: $1.00/token, 48/2/50 graduation, 50/50 trading fees, agreement ${agreementHash.slice(0, 12)}...`);
 
@@ -393,6 +426,8 @@ async function main() {
     assertTrue("dbcPool present", typeof dbcPool === "string" && dbcPool.length > 0);
     assertEqual("agreement hash unchanged from preview", create.body.agreementHash, agreementHash);
     assertEqual("status LIVE", create.body.status, "LIVE");
+    const inviteCode: string = create.body.inviteCode;
+    assertTrue("invite link carries the invite code", create.body.onboardUrl.endsWith(`?invite=${inviteCode}`));
     console.log(`  issuanceId ${issuanceId}`);
     console.log(`  market:  ${create.body.marketUrl}`);
     console.log(`  onboard: ${create.body.onboardUrl}`);
@@ -401,7 +436,7 @@ async function main() {
     step("Hook moment, in the browser: Carol (not onboarded) tries to buy");
     const carol = makeWallet("Carol");
     const carolSwap = await api("POST", `/issuances/${issuanceId}/swap`, {
-      body: { owner: carol.address, side: "BUY", amountIn: usdcBaseUnits(10_000n) },
+      body: { owner: carol.address, side: "BUY", amountIn: usdcBaseUnits(sc(10_000n)) },
     });
     assertEqual("swap route still returns a quote + unsigned tx (200)", carolSwap.status, 200);
     assertEqual("Carol is not a registered participant", carolSwap.body.registered, false);
@@ -417,116 +452,116 @@ async function main() {
     );
 
     // ---- 3. Buy: Alice onboards and buys 100k ----
-    step("Buy, in the browser: Alice onboards and buys 100,000 ACME-CF");
+    step(`Buy, in the browser: Alice onboards and buys ${grouped(sc(100_000n))} ACME-CF`);
     const alice = makeWallet("Alice");
-    const aliceAgreementSig = alice.signMessage(agreementAcceptanceMessage(agreementHash, issuanceId));
+    const aliceAgreementSig = alice.signMessage(agreementAcceptanceMessage({ issuanceId, wallet: alice.address, agreementHash }));
     const aliceOnboard = await api("POST", `/issuances/${issuanceId}/participants`, {
-      body: { wallet: alice.address, displayName: "Alice", verified: true, eligible: true, agreementHash, signature: aliceAgreementSig },
+      body: { wallet: alice.address, displayName: "Alice", eligible: true, agreementHash, signature: aliceAgreementSig, invite: inviteCode },
     });
     assertEqual("Alice onboarding status 200", aliceOnboard.status, 200);
     assertEqual('Alice: "Trading enabled"', aliceOnboard.body.status, "Trading enabled");
     assertTrue("Alice allowlisted on-chain (allowlistTx recorded)", Boolean(aliceOnboard.body.participant.allowlistTx));
 
-    const aliceQuote = await api("GET", `/issuances/${issuanceId}/quote?side=BUY&amountIn=${usdcBaseUnits(100_000n)}`);
+    const aliceQuote = await api("GET", `/issuances/${issuanceId}/quote?side=BUY&amountIn=${usdcBaseUnits(sc(100_000n))}`);
     assertEqual("quote status 200", aliceQuote.status, 200);
     assertEqual("quote pays USDC, receives ACME-CF", `${aliceQuote.body.pay.asset}->${aliceQuote.body.receive.asset}`, "USDC->ACME-CF");
     const aliceSwap = await api("POST", `/issuances/${issuanceId}/swap`, {
-      body: { owner: alice.address, side: "BUY", amountIn: usdcBaseUnits(100_000n) },
+      body: { owner: alice.address, side: "BUY", amountIn: usdcBaseUnits(sc(100_000n)) },
     });
     assertEqual("Alice's swap route status 200", aliceSwap.status, 200);
     assertEqual("Alice is a registered participant", aliceSwap.body.registered, true);
     assertEqual("no NotEligible warning for Alice", aliceSwap.body.warning, null);
-    await fakeSwap(dbcPool, alice.address, "BUY", 100_000n * TOKEN_UNIT);
-    pass("Alice's buy confirmed on-chain", "100,000 ACME-CF");
+    await fakeSwap(dbcPool, alice.address, "BUY", sc(100_000n) * TOKEN_UNIT);
+    pass("Alice's buy confirmed on-chain", `${grouped(sc(100_000n))} ACME-CF`);
 
     const holders1 = await api("GET", `/issuances/${issuanceId}/holders`, { auth: true });
     assertEqual("holders status 200", holders1.status, 200);
     const aliceRow1 = holders1.body.holders.find((h: { wallet: string }) => h.wallet === alice.address);
     assertTrue("Alice appears in the holders table", Boolean(aliceRow1));
-    assertEqual("Alice holds 100,000 tokens", aliceRow1.tokens.display, "100,000");
+    assertEqual("Alice holds 100,000 x scale tokens", aliceRow1.tokens.display, grouped(sc(100_000n)));
     assertEqual("Alice classified as a registered participant", aliceRow1.kind, "PARTICIPANT");
     assertEqual("Alice = 10% of supply", aliceRow1.pctOfSupply, "10%");
 
     // ---- 4. Q3, in Codex (simulated over HTTP) ----
-    step("Q3, in Codex: DCF $400,000 from demo/finance/q3-2026.csv -> $40,000 pool, $0.04/token");
+    step(`Q3, in Codex: DCF $${grouped(sc(400_000n))} -> $${scUsdc(40_000n)} pool, $0.04/token`);
     const q3Report = await api("POST", `/issuances/${issuanceId}/distributions`, {
       auth: true,
-      body: { periodLabel: "2026-Q3", dcf: "400000", reportUrl: "https://founderstack.dev/demo/finance/q3-2026.csv" },
+      body: { periodLabel: "2026-Q3", dcf: sc(400_000n).toString(), reportUrl: "https://founderstack.dev/demo/finance/q3-2026.csv" },
     });
     assertEqual("Q3 report status 201", q3Report.status, 201);
     const q3Id: string = q3Report.body.distribution.id;
-    assertEqual("Q3 rights pool = $40,000", q3Report.body.distribution.rightsPool.usdc, "40000");
+    assertEqual("Q3 rights pool = $40,000 x scale", q3Report.body.distribution.rightsPool.usdc, scUsdc(40_000n));
     assertEqual("Q3 per token = $0.04", q3Report.body.distribution.perToken.usdc, "0.04");
     assertEqual("Q3 status DRAFT", q3Report.body.distribution.status, "DRAFT");
     assertTrue("Q3 reportHash is a sha256 hex digest", /^[0-9a-f]{64}$/.test(q3Report.body.distribution.reportHash));
 
     const q3Snapshot = await api("POST", `/distributions/${q3Id}/snapshot`, { auth: true });
     assertEqual("Q3 snapshot status 200", q3Snapshot.status, 200);
-    assertEqual("Q3 confirmTotal = 4000", q3Snapshot.body.confirmTotal, "4000");
-    assertEqual("Q3 unallocated (pool) = $36,000", q3Snapshot.body.unallocated.total.usdc, "36000");
+    assertEqual("Q3 confirmTotal = 4000 x scale", q3Snapshot.body.confirmTotal, scUsdc(4_000n));
+    assertEqual("Q3 unallocated (pool) = $36,000 x scale", q3Snapshot.body.unallocated.total.usdc, scUsdc(36_000n));
     const q3AliceSnap = q3Snapshot.body.rows.find((r: { wallet: string }) => r.wallet === alice.address);
     assertTrue("Alice is in the Q3 snapshot", Boolean(q3AliceSnap));
-    assertEqual("Q3 snapshot: Alice previewed payout = 4000", q3AliceSnap.payout.usdc, "4000");
-    assertEqual("Q3 snapshot: Alice tokens = 100,000", q3AliceSnap.tokens.display, "100,000");
+    assertEqual("Q3 snapshot: Alice previewed payout = 4000 x scale", q3AliceSnap.payout.usdc, scUsdc(4_000n));
+    assertEqual("Q3 snapshot: Alice tokens = 100,000 x scale", q3AliceSnap.tokens.display, grouped(sc(100_000n)));
 
-    const q3Execute = await api("POST", `/distributions/${q3Id}/execute`, { auth: true, body: { confirmTotal: "4000" } });
+    const q3Execute = await api("POST", `/distributions/${q3Id}/execute`, { auth: true, body: { confirmTotal: scUsdc(4_000n) } });
     assertEqual("Q3 execute status 200", q3Execute.status, 200);
     assertEqual("Q3 distribution EXECUTED", q3Execute.body.distribution.status, "EXECUTED");
     const q3AlicePaid = q3Execute.body.rows.find((r: { wallet: string }) => r.wallet === alice.address);
     assertTrue("Alice's Q3 payout row found", Boolean(q3AlicePaid));
-    assertEqual("Alice receives $4,000 USDC for Q3", q3AlicePaid.payout.usdc, "4000");
+    assertEqual("Alice receives $4,000 x scale USDC for Q3", q3AlicePaid.payout.usdc, scUsdc(4_000n));
     assertTrue("Alice's Q3 payout is paid with a signature", q3AlicePaid.paid === true && Boolean(q3AlicePaid.txSignature));
     assertEqual("Q3: one payout signature", q3Execute.body.signatures.length, 1);
     assertTrue("Q3 signature is fake (CHAIN_MODE=fake)", q3Execute.body.signatures[0].fake === true);
 
     // ---- 5. Trade, in the browser ----
-    step("Trade, in the browser: Bob onboards; Alice sells 40,000 into the pool, Bob buys 40,000");
-    await fakeSwap(dbcPool, alice.address, "SELL", 40_000n * TOKEN_UNIT);
+    step(`Trade, in the browser: Bob onboards; Alice sells ${grouped(sc(40_000n))} into the pool, Bob buys ${grouped(sc(40_000n))}`);
+    await fakeSwap(dbcPool, alice.address, "SELL", sc(40_000n) * TOKEN_UNIT);
     const bob = makeWallet("Bob");
-    const bobAgreementSig = bob.signMessage(agreementAcceptanceMessage(agreementHash, issuanceId));
+    const bobAgreementSig = bob.signMessage(agreementAcceptanceMessage({ issuanceId, wallet: bob.address, agreementHash }));
     const bobOnboard = await api("POST", `/issuances/${issuanceId}/participants`, {
-      body: { wallet: bob.address, displayName: "Bob", verified: true, eligible: true, agreementHash, signature: bobAgreementSig },
+      body: { wallet: bob.address, displayName: "Bob", eligible: true, agreementHash, signature: bobAgreementSig, invite: inviteCode },
     });
     assertEqual("Bob onboarding status 200", bobOnboard.status, 200);
     assertEqual('Bob: "Trading enabled"', bobOnboard.body.status, "Trading enabled");
     const bobSwap = await api("POST", `/issuances/${issuanceId}/swap`, {
-      body: { owner: bob.address, side: "BUY", amountIn: usdcBaseUnits(40_000n) },
+      body: { owner: bob.address, side: "BUY", amountIn: usdcBaseUnits(sc(40_000n)) },
     });
     assertEqual("Bob's swap route status 200", bobSwap.status, 200);
     assertEqual("Bob is a registered participant", bobSwap.body.registered, true);
-    await fakeSwap(dbcPool, bob.address, "BUY", 40_000n * TOKEN_UNIT);
+    await fakeSwap(dbcPool, bob.address, "BUY", sc(40_000n) * TOKEN_UNIT);
 
     const holders2 = await api("GET", `/issuances/${issuanceId}/holders`, { auth: true });
     const aliceRow2 = holders2.body.holders.find((h: { wallet: string }) => h.wallet === alice.address);
     const bobRow2 = holders2.body.holders.find((h: { wallet: string }) => h.wallet === bob.address);
-    assertEqual("holders table: Alice now holds 60,000", aliceRow2.tokens.display, "60,000");
-    assertEqual("holders table: Bob now holds 40,000", bobRow2.tokens.display, "40,000");
+    assertEqual("holders table: Alice now holds 60,000 x scale", aliceRow2.tokens.display, grouped(sc(60_000n)));
+    assertEqual("holders table: Bob now holds 40,000 x scale", bobRow2.tokens.display, grouped(sc(40_000n)));
 
     // ---- 6. Q4, in Claude Code (simulated over HTTP) ----
-    step("Q4, in Claude Code: DCF $450,000 from demo/finance/q4-2026.csv -> $45,000 pool, $0.045/token");
+    step(`Q4, in Claude Code: DCF $${grouped(sc(450_000n))} -> $${scUsdc(45_000n)} pool, $0.045/token`);
     const q4Report = await api("POST", `/issuances/${issuanceId}/distributions`, {
       auth: true,
-      body: { periodLabel: "2026-Q4", dcf: "450000", reportUrl: "https://founderstack.dev/demo/finance/q4-2026.csv" },
+      body: { periodLabel: "2026-Q4", dcf: sc(450_000n).toString(), reportUrl: "https://founderstack.dev/demo/finance/q4-2026.csv" },
     });
     assertEqual("Q4 report status 201", q4Report.status, 201);
     const q4Id: string = q4Report.body.distribution.id;
-    assertEqual("Q4 rights pool = $45,000", q4Report.body.distribution.rightsPool.usdc, "45000");
+    assertEqual("Q4 rights pool = $45,000 x scale", q4Report.body.distribution.rightsPool.usdc, scUsdc(45_000n));
     assertEqual("Q4 per token = $0.045", q4Report.body.distribution.perToken.usdc, "0.045");
 
     const q4Snapshot = await api("POST", `/distributions/${q4Id}/snapshot`, { auth: true });
     assertEqual("Q4 snapshot status 200", q4Snapshot.status, 200);
-    assertEqual("Q4 confirmTotal = 4500", q4Snapshot.body.confirmTotal, "4500");
+    assertEqual("Q4 confirmTotal = 4500 x scale", q4Snapshot.body.confirmTotal, scUsdc(4_500n));
     const q4AliceSnap = q4Snapshot.body.rows.find((r: { wallet: string }) => r.wallet === alice.address);
     const q4BobSnap = q4Snapshot.body.rows.find((r: { wallet: string }) => r.wallet === bob.address);
-    assertEqual("Q4 snapshot: Alice tokens = 60,000", q4AliceSnap.tokens.display, "60,000");
-    assertEqual("Q4 snapshot: Bob tokens = 40,000", q4BobSnap.tokens.display, "40,000");
+    assertEqual("Q4 snapshot: Alice tokens = 60,000 x scale", q4AliceSnap.tokens.display, grouped(sc(60_000n)));
+    assertEqual("Q4 snapshot: Bob tokens = 40,000 x scale", q4BobSnap.tokens.display, grouped(sc(40_000n)));
 
-    const q4Execute = await api("POST", `/distributions/${q4Id}/execute`, { auth: true, body: { confirmTotal: "4500" } });
+    const q4Execute = await api("POST", `/distributions/${q4Id}/execute`, { auth: true, body: { confirmTotal: scUsdc(4_500n) } });
     assertEqual("Q4 execute status 200", q4Execute.status, 200);
     const q4AlicePaid = q4Execute.body.rows.find((r: { wallet: string }) => r.wallet === alice.address);
     const q4BobPaid = q4Execute.body.rows.find((r: { wallet: string }) => r.wallet === bob.address);
-    assertEqual("Alice receives $2,700 USDC for Q4 (60,000 tokens)", q4AlicePaid.payout.usdc, "2700");
-    assertEqual("Bob receives $1,800 USDC for Q4 — the units Alice sold now pay Bob", q4BobPaid.payout.usdc, "1800");
+    assertEqual("Alice receives $2,700 x scale USDC for Q4 (60%)", q4AlicePaid.payout.usdc, scUsdc(2_700n));
+    assertEqual("Bob receives $1,800 x scale USDC for Q4 — the units Alice sold now pay Bob", q4BobPaid.payout.usdc, scUsdc(1_800n));
     assertTrue("both Q4 payouts are paid with signatures", Boolean(q4AlicePaid.txSignature) && Boolean(q4BobPaid.txSignature));
 
     // ---- 7. Market page / status summary ----
@@ -562,7 +597,7 @@ async function main() {
   History: ${executedPeriods.map((d: { periodLabel: string; totalAllocated: { display: string } }) => `${d.periodLabel} EXECUTED ${d.totalAllocated.display}`).join("  |  ")}
   ${"-".repeat(64)}`);
 
-    console.log("\nDEMO E2E: PASS — Alice $4,000 (Q3), Alice $2,700 / Bob $1,800 (Q4) confirmed end to end over HTTP.");
+    console.log(`\nDEMO E2E: PASS (DEMO_SCALE=${DEMO_SCALE}) — Alice $${scUsdc(4_000n)} (Q3), Alice $${scUsdc(2_700n)} / Bob $${scUsdc(1_800n)} (Q4) confirmed end to end over HTTP.`);
   } catch (e) {
     failed = true;
     console.error(`\nDEMO E2E: FAIL — ${e instanceof Error ? e.message : String(e)}`);
@@ -573,7 +608,14 @@ async function main() {
   process.exitCode = failed ? 1 : 0;
 }
 
-main().catch((e) => {
+if (DRY_RUN) {
+  import("./demo-e2e-dry-run")
+    .then((m) => m.dryRun({ scale: DEMO_SCALE, supply: SUPPLY, sc }))
+    .catch((e) => {
+      console.error(`\nDRY RUN: FAIL — ${e instanceof Error ? e.message : String(e)}`);
+      process.exitCode = 1;
+    });
+} else main().catch((e) => {
   console.error("DEMO E2E: FAIL (unhandled)", e);
   process.exitCode = 1;
 });

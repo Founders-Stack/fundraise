@@ -14,7 +14,7 @@ const payout = fake.ports.payout;
 
 const report = (issuanceId: string, body: unknown) => call(reportPOST, post(body), issuanceId);
 const snapshot = (id: string) => call(snapshotPOST, post(undefined), id);
-const execute = (id: string, confirmTotal?: string) => call(executePOST, post(confirmTotal === undefined ? {} : { confirmTotal }), id);
+const execute = (id: string, confirmTotal?: string) => call(executePOST, post(confirmTotal === undefined ? { payoutMode: "direct" } : { confirmTotal, payoutMode: "direct" }), id);
 const history = (issuanceId: string) => call(historyGET, get(), issuanceId);
 
 beforeAll(() => {
@@ -100,6 +100,8 @@ describe("distribution lifecycle", () => {
     expect(e3.body.distribution.status).toBe("EXECUTED");
     expect(e3.body.signatures).toHaveLength(1);
     expect(e3.body.signatures[0].fake).toBe(true);
+    // A26: the payout transaction carries the report hash as an SPL memo
+    expect(fake.control.memoOf(e3.body.signatures[0].signature)).toBe(`fstack:report:${d3.reportHash}`);
     expect(usdcOf(alice)).toBe(4_000n * USDC);
     expect(e3.body.nextRecordDate).toBe("2026-12-31T23:59:59.999Z");
 

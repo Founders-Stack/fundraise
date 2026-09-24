@@ -20,8 +20,12 @@
 //! - `initialize_virtual_pool_with_token2022_transfer_hook` creates the base mint with
 //!   `TransferHook { authority: pool_authority, program_id: <this program> }` and MINTS the
 //!   whole supply into the base vault (MintTo does not invoke the hook). DBC never CPIs into
-//!   this program during pool creation, so `initialize` is a separate transaction sent by the
-//!   Founder Stack authority right after the pool exists (it only needs the mint to exist).
+//!   this program during pool creation, so `initialize` only needs the mint to exist and can run
+//!   as a later instruction of the SAME transaction. The chain lib (apps/web/lib/chain/devnet/dbc.ts
+//!   `createHookPool`) sends [DBC create pool, fs_allowlist.initialize, add_allow(pool authority)]
+//!   atomically (H12): the mint never exists on-chain without its Config. Only the DBC partner
+//!   `createConfig` goes in a preceding tx, because config + pool + hook init in one legacy tx is
+//!   1380 bytes (> 1232); pool + hook init is ~1044 bytes.
 //! - Swaps (`swap2_with_transfer_hook`) forward the extra accounts to Token-2022 through
 //!   `add_extra_accounts_for_execute_cpi`, which resolves our AccountData seed on-chain.
 //!   NOTE: the DBC SDK's client-side resolver passes PublicKey.default as the destination,
@@ -34,9 +38,13 @@
 //! `add_allow(pool_authority)` (the DBC pool-authority PDA owns the base vault),
 //! otherwise sells into the pool fail with `NotEligible`. No special-casing here.
 //!
-//! Hardening: `initialize` must be signed by `FS_AUTHORITY` (hardcoded) so nobody can
-//! front-run the Config/ExtraAccountMetaList creation for a freshly created mint and take
-//! over its allowlist admin.
+//! Hardening (H12): `initialize` must be signed by `FS_AUTHORITY` (compile-time constant) so
+//! nobody can front-run the Config/ExtraAccountMetaList creation for a freshly created mint and
+//! take over its allowlist admin. Defense in depth with the atomic bundling above.
+//!
+//! Cluster: the default build uses the devnet authority. For mainnet build with
+//! `FS_AUTHORITY_MAINNET=<pubkey> anchor build -- --features mainnet`; the pubkey is parsed at
+//! compile time, so a missing/invalid value fails the build instead of shipping a wrong key.
 
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
@@ -61,7 +69,12 @@ pub const EXTRA_METAS_SEED: &[u8] = b"extra-account-metas";
 
 /// Founder Stack authority (devnet: keys/fs-authority.json). Only this key may initialize
 /// a mint's allowlist Config + ExtraAccountMetaList.
+#[cfg(not(feature = "mainnet"))]
 pub const FS_AUTHORITY: Pubkey = pubkey!("947L5j9d55jFGNyCSwguX8PHTDb5VNyidvRhy7UPDtUB");
+
+/// Mainnet Founder Stack authority, injected at build time (see module docs).
+#[cfg(feature = "mainnet")]
+pub const FS_AUTHORITY: Pubkey = Pubkey::from_str_const(env!("FS_AUTHORITY_MAINNET"));
 
 #[program]
 pub mod fs_allowlist {

@@ -2,6 +2,7 @@
 
 import { createHash } from "node:crypto";
 import type { CashFlowTerms } from "./terms";
+import { currentCluster, type ClusterConfig } from "../cluster";
 
 function groupThousands(n: bigint): string {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -17,14 +18,14 @@ const FREQ_TEXT: Record<CashFlowTerms["distributionFrequency"], { adj: string; p
   MONTHLY: { adj: "monthly", period: "calendar month" },
 };
 
-/** Renders the Cash Flow Participation Agreement as markdown. Deterministic for given terms. */
-export function renderAgreement(terms: CashFlowTerms): string {
+/** Renders the Cash Flow Participation Agreement as markdown. Deterministic for given terms and cluster. */
+export function renderAgreement(terms: CashFlowTerms, cluster: ClusterConfig = currentCluster()): string {
   const supply = groupThousands(terms.tokenSupply);
   const pool = formatBps(terms.poolPercentageBps);
   const freq = FREQ_TEXT[terms.distributionFrequency];
   const issuer = terms.issuerName;
 
-  return `> **DEMO — devnet prototype, not an offer of securities.** This document is a hackathon prototype template. It has no legal effect and nothing on devnet has monetary value.
+  return `> ${cluster.copy.agreementBanner}
 
 # Cash Flow Participation Agreement
 

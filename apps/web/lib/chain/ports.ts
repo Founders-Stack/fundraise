@@ -95,14 +95,71 @@ export interface RegistryPort {
    * `extraOwners` must be included even if the adapter can't discover them (e.g. pool vault owners).
    */
   getBalances(mint: string, extraOwners: string[]): Promise<{ slot: number; balances: TokenBalance[] }>;
+  /** One wallet's funds for the onboarding pre-flight (SPEC section 6): SOL in lamports, USDC and `mint` units in base units. */
+  getWalletFunds(mint: string, owner: string): Promise<WalletFunds>;
+}
+
+export interface WalletFunds {
+  lamports: bigint;
+  quote: bigint;
+  base: bigint;
 }
 
 export interface PayoutPort {
   quoteMint(): string;
   issuerAddress(): string;
   getIssuerQuoteBalance(): Promise<bigint>;
-  /** Transfers USDC from the issuer to each wallet in ONE transaction (caller batches ≤ 10). */
-  transferBatch(rows: { wallet: string; amount: bigint }[]): Promise<{ signature: string }>;
+  /**
+   * Transfers USDC from the issuer to each wallet in ONE transaction (caller batches ≤ 10).
+   * `memo` (≤ 200 bytes UTF-8) is written into the same transaction as an SPL Memo instruction, so the
+   * payout is tied on-chain to the report it pays (e.g. `fstack:report:<reportHash>`).
+   */
+  transferBatch(rows: { wallet: string; amount: bigint }[], opts?: { memo?: string }): Promise<{ signature: string }>;
+}
+
+/**
+ * Claim escrow for distributions (SPEC section 7, P1): a server-held USDC token account. The issuer
+ * funds it with one transfer (payout.transferBatch or a wallet-signed transfer to `address()`), and
+ * each holder's claim is released from it after the API verifies their Merkle proof. Per-distribution
+ * accounting lives in the database; this port only moves USDC out of the escrow wallet.
+ */
+export interface EscrowPort {
+  /** Owner wallet of the escrow USDC account (the transfer destination when funding). */
+  address(): string;
+  getBalance(): Promise<bigint>;
+  /** Transfers USDC from the escrow to each row in ONE transaction, with an optional SPL memo. */
+  release(rows: { wallet: string; amount: bigint }[], opts?: { memo?: string }): Promise<{ signature: string }>;
+}
+
+/**
+ * A transaction the founder signs in their own wallet (SPEC 0.4 P1, `/sign/[requestId]`).
+ * `tx` is a base64 legacy transaction, possibly already partially signed by ephemeral server
+ * keys (new mint / config accounts). `lastValidBlockHeight` bounds how long it can land.
+ */
+export interface UnsignedTx {
+  tx: string;
+  label: string;
+  lastValidBlockHeight: number;
+}
+
+export interface WalletPool extends Omit<CreatePoolResult, "signatures"> {
+  /** Extra data the adapter needs in finalizeCreatePool (JSON-safe). */
+  finalize?: Record<string, unknown>;
+}
+
+/** Wallet-signing seam: builds txs for the founder's wallet instead of signing with server keys. */
+export interface WalletSigningPort {
+  /** Create-pool tx with `creator` as fee payer + pool creator; the pool addresses are fixed now. */
+  buildCreatePoolTx(input: CreatePoolInput, creator: string): Promise<{ tx: UnsignedTx; pool: WalletPool }>;
+  /** Server-side follow-up once the founder's create tx landed (Founder Stack allowlist setup). */
+  finalizeCreatePool(pool: WalletPool): Promise<{ signatures: string[] }>;
+  /** USDC transfers from `from` (the founder's wallet) to each row in ONE tx (caller batches). */
+  buildTransferBatchTx(from: string, rows: { wallet: string; amount: bigint }[]): Promise<UnsignedTx>;
+  /**
+   * Checks that `signedTx` is exactly `unsigned` plus a valid signature by `signer`, broadcasts it
+   * and waits for confirmation. Throws on mismatch or on-chain failure.
+   */
+  submitSigned(unsigned: UnsignedTx, signedTx: string, signer: string): Promise<{ signature: string }>;
 }
 
 export interface ChainPorts {
@@ -110,4 +167,6 @@ export interface ChainPorts {
   market: MarketPort;
   registry: RegistryPort;
   payout: PayoutPort;
+  escrow: EscrowPort;
+  wallet: WalletSigningPort;
 }

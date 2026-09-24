@@ -33,6 +33,8 @@ export async function POST(req: Request) {
   if (denied) return denied;
   return handle(async () => {
     const body = await readJson(req);
-    return json(await createIssuance(body.previewId), { status: 201 });
+    const result = await createIssuance(body.previewId, { signingMode: body.signingMode });
+    // Wallet signing mode: accepted, nothing on-chain yet (the founder signs at result.signUrl).
+    return json(result, { status: result.status === "AWAITING_SIGNATURE" ? 202 : 201 });
   });
 }

@@ -7,6 +7,29 @@ the server just **forwards your bearer token** and returns the API's JSON.
 
 > Skills are the conversation, the MCP server is the hands, the API is the brain.
 
+## Quick start (npx)
+
+```bash
+FS_API_URL=https://<your-deployment>.vercel.app/api FS_API_TOKEN=<token> npx -y fstack-mcp
+```
+
+Claude Code:
+
+```bash
+claude mcp add fstack -e FS_API_URL=https://<your-deployment>.vercel.app/api -e FS_API_TOKEN=<token> -- npx -y fstack-mcp
+```
+
+Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.fstack]
+command = "npx"
+args = ["-y", "fstack-mcp"]
+env = { FS_API_URL = "https://<your-deployment>.vercel.app/api", FS_API_TOKEN = "..." }
+```
+
+The server speaks MCP over stdio; it prints nothing else to stdout.
+
 ## Configuration
 
 | Env | Default | Purpose |
@@ -26,8 +49,18 @@ the server just **forwards your bearer token** and returns the API's JSON.
 | `fundraise_report_period` | `POST /api/issuances/:id/distributions` `{ periodLabel, dcf, reportUrl? }` | DB (DRAFT) |
 | `fundraise_list_distributions` | `GET /api/issuances/:id/distributions` (public) | — |
 | `fundraise_snapshot` | `POST /api/distributions/:id/snapshot` | DB (preview + `confirmTotal`) |
-| `fundraise_execute_distribution` | `POST /api/distributions/:id/execute` `{ confirmTotal }` | ✅ USDC |
+| `fundraise_execute_distribution` | `POST /api/distributions/:id/execute` `{ confirmTotal, payoutMode? }` (default `escrow`: fund the claim escrow; `direct`: pay holders) | ✅ USDC |
+| `fundraise_get_claim_proof` | `GET /api/distributions/:id/proof?wallet=` | — |
 | `fundraise_get_distribution` | `GET /api/distributions/:id` | — |
+| `fundraise_get_sign_request` | `GET /api/sign/:id` | — |
+
+**Signing (SPEC 0.4).** `fundraise_create_issuance` and `fundraise_execute_distribution` take an optional
+`signingMode`: `"custody"` (the server signs; closed pilot) or `"wallet"`. Omitted, the server default applies
+(`FS_SIGNING_MODE`, else `custody`). In wallet mode nothing happens on-chain yet: the response is
+`{ status: "AWAITING_SIGNATURE", signUrl, signRequestId }`. The founder opens `signUrl` (`/sign/[requestId]`)
+in their own browser, connects their wallet, reviews the summary and signs; the API verifies the signed
+transactions match what it prepared, broadcasts them and applies the result. Poll
+`fundraise_get_sign_request` until `status` is `COMPLETED` (its `result` is what the custody call returns).
 
 Distribution amounts (`dcf`, `confirmTotal`) are USDC **decimal strings** (`"400000"`, `"4,000.00"`), never
 base units. `confirmTotal` must be the exact total the founder typed; the API rejects any mismatch, so an
@@ -46,7 +79,7 @@ stop and show the message (e.g. `401` → check `FS_API_TOKEN`).
 ## Build and run
 
 ```bash
-pnpm --filter @fstack/mcp build
+pnpm --filter fstack-mcp build
 FS_API_URL=http://localhost:3000/api FS_API_TOKEN=... node packages/fstack-mcp/dist/index.js
 ```
 

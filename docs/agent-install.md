@@ -48,7 +48,7 @@ claude -p --plugin-dir ./plugins/fstack \
 `claude plugin marketplace add <repo>` then `claude plugin install fstack@<marketplace>`. Before that ships,
 `.mcp.json` must stop pointing at `${CLAUDE_PLUGIN_ROOT}/../../packages/fstack-mcp/dist/index.js`, because
 installed plugins are copied into the plugin cache and the path would escape it. Instead, publish
-`@fstack/mcp` and use `"command": "npx", "args": ["-y", "@fstack/mcp"]`, or bundle `dist/` inside the plugin.
+`fstack-mcp` and use `"command": "npx", "args": ["-y", "fstack-mcp"]`, or bundle `dist/` inside the plugin.
 
 ## Codex
 

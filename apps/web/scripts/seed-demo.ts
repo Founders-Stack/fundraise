@@ -5,6 +5,7 @@
 // launched so the home page lists more than one market.
 import nacl from "tweetnacl";
 import bs58 from "bs58";
+import { agreementAcceptanceMessage } from "../lib/server/agreement-message";
 
 const BASE = (process.argv[2] ?? process.env.SEED_BASE_URL ?? "http://localhost:3000").replace(/\/+$/, "");
 const TOKEN = process.env.FS_API_TOKEN ?? "dev-local-token";
@@ -29,19 +30,20 @@ function wallet(name: string) {
 async function launch(terms: Record<string, unknown>) {
   const preview = await call("POST", "/api/issuances/preview", terms, true);
   const created = await call("POST", "/api/issuances", { previewId: preview.previewId }, true);
-  return created as { issuanceId: string; agreementHash: string };
+  return created as { issuanceId: string; agreementHash: string; inviteCode: string };
 }
 
-async function onboard(id: string, agreementHash: string, w: ReturnType<typeof wallet>) {
-  const msg = `Founder Stack: I accept the Cash Flow Participation Agreement ${agreementHash} for issuance ${id}`;
+async function onboard(iss: { issuanceId: string; agreementHash: string; inviteCode: string }, w: ReturnType<typeof wallet>) {
+  const { issuanceId: id, agreementHash } = iss;
+  const msg = agreementAcceptanceMessage({ issuanceId: id, wallet: w.address, agreementHash });
   const sig = nacl.sign.detached(new TextEncoder().encode(msg), w.kp.secretKey);
   return call("POST", `/api/issuances/${id}/participants`, {
     wallet: w.address,
     displayName: w.name,
-    verified: true,
     eligible: true,
     agreementHash,
     signature: bs58.encode(sig),
+    invite: iss.inviteCode,
   });
 }
 
@@ -74,7 +76,7 @@ async function main() {
   const bob = wallet("Bob");
   const carol = wallet("Carol");
 
-  await onboard(id, acme.agreementHash, alice);
+  await onboard(acme, alice);
   await swap(id, alice.address, "BUY", 100_000n);
   try {
     await swap(id, carol.address, "BUY", 1_000n);
@@ -84,7 +86,7 @@ async function main() {
   const q3 = await distribute(id, "2026-Q3", "400000");
   console.log("Q3 executed", q3.distId);
 
-  await onboard(id, acme.agreementHash, bob);
+  await onboard(acme, bob);
   await swap(id, alice.address, "SELL", 40_000n);
   await swap(id, bob.address, "BUY", 40_000n);
   const q4 = await distribute(id, "2026-Q4", "450000");
@@ -99,11 +101,23 @@ async function main() {
     distributionFrequency: "QUARTERLY",
   });
   const dave = wallet("Dave");
-  await onboard(nw.issuanceId, nw.agreementHash, dave);
+  await onboard(nw, dave);
   await swap(nw.issuanceId, dave.address, "BUY", 25_000n);
   console.log("NWND issuance", nw.issuanceId);
 
-  console.log(JSON.stringify({ acme: id, northwind: nw.issuanceId, wallets: { alice: alice.address, bob: bob.address, carol: carol.address } }, null, 2));
+  const invite = (iss: { issuanceId: string; inviteCode: string }) => `${BASE}/onboard/${iss.issuanceId}?invite=${iss.inviteCode}`;
+  console.log(
+    JSON.stringify(
+      {
+        acme: id,
+        northwind: nw.issuanceId,
+        inviteLinks: { acme: invite(acme), northwind: invite(nw) },
+        wallets: { alice: alice.address, bob: bob.address, carol: carol.address },
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 main().catch((e) => {

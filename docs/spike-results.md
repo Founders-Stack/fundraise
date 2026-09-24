@@ -21,7 +21,12 @@ Faucet: issuer 10,000,000 USDC (`hgghkdeaxQdhPyzDZxKSGdYc2nVSLgpjAaoaocMEzULny9X
   `TransferHook { program_id: fs_allowlist, authority: DBC pool authority }` and **mints** the
   whole supply into the base vault. MintTo does not invoke the hook. DBC never CPIs into the hook
   program at creation time, so it never calls `InitializeExtraAccountMetaList`.
-  → Our `initialize` runs as a separate tx right after the pool (signed by `FS_AUTHORITY`, which is hardcoded in the program), then `add_allow(pool authority)`.
+  → H12 (A27): `createHookPool` sends DBC `createConfig` first (no mint yet, nothing to front-run), then ONE atomic tx
+  `[DBC create pool (mints hook-enabled mint), fs_allowlist.initialize (signed by FS_AUTHORITY), add_allow(pool authority)]`.
+  The mint never exists without its allowlist Config. All four ixs in one legacy tx would be 1380 bytes (> 1232 limit),
+  hence the config split; pool + hook init is ~1044 bytes. Devnet proof: config `5XYLJgKap7p5vaMb1wUrbSa7CY9uu5QKmNhKChXz7eUL5JGxF4n7THPSRRwkso4bd3FXPAo5F2HVtyzUmvmd7psd`,
+  atomic pool+initialize+add_allow `4gEBMWrhVw8PdUXP3KUDrxhaQi34XN1Ch6ckGs15oztWQVdQUwzyozd4aUJDPcsccXpUHYu8LLW5a6co1W9qPJNq` (pool `AGQRHrpKQ9xeAo4DMz5zsKHehMshGUqDwXxejek22Dmn`); the spike's buy/sell/NotEligible checks passed on that pool.
+  `FS_AUTHORITY` is a compile-time constant (devnet default; mainnet: `FS_AUTHORITY_MAINNET=<pubkey> anchor build -- --features mainnet`).
 - Swaps (`swap2_with_transfer_hook`) forward the remaining accounts to Token-2022, which resolves the extra-account-meta list on-chain.
   The SDK's client-side resolver passes `PublicKey.default` as the destination, so it **cannot** resolve our `AccountData` seed (destination owner) and throws.
   → `lib/chain/devnet/dbc.ts` overrides the resolver with `[AllowEntry(dest owner), fs_allowlist, ExtraAccountMetaList]`. The destination owner is the buyer on a BUY and the DBC pool authority on a SELL.
@@ -38,6 +43,19 @@ Faucet: issuer 10,000,000 USDC (`hgghkdeaxQdhPyzDZxKSGdYc2nVSLgpjAaoaocMEzULny9X
 | H6: holder listing | **FAIL on public RPC → fallback PASS** | `api.devnet.solana.com`: `getProgramAccounts(Token-2022)` fails with "excluded from account secondary indexes"; `getTokenLargestAccounts` returns 429 (~47 s). Fallback used in `real.ts`: `getProgramAccounts(fs_allowlist, mint memcmp)` returns the AllowEntries (~200 ms), then we read their Token-2022 ATAs plus the DBC base vault. Result: alice 449.779517 + pool 999,550.220483 = the full 1,000,000 supply. Primary gPA path is kept for a Helius-type RPC. Limits: misses non-ATA token accounts and holders after graduation (hook revoked). |
 | H8: start price | **PASS (0.00 %)** | pool price at creation = 1,000,000 base units = $1.000000. A 1 USDC buy quote → 0.899999 token (10% launch fee). **Note:** SDK `buildCurveWithMarketCap` throws `Not enough liquidity … amountLeft ~357` for $1M→$3M with a 6-dp base token (precision issue; the same inputs with 9 dp work). `buildCurveWithMarketCapRobust` falls back to `buildCurveWithCustomSqrtPrices` with start and migration prices taken from the 9-dp build. The threshold differs by 0.0057 USDC. |
 | H5: hook pool → DAMM v2 | **PASS (migration only)** | Tiny pool `4PP4duUFgNs3trTQwQNZvstWcQJ5uzHXF1UY6onZ4Hpt` ($100→$300, threshold 134.405542 USDC). Fill with a partial-fill buy `h8vyqc9k21FpaoJXvm6P8Qt8pHFzVVTXzmytG2n7phJuuKbQzDPosc5K5Cs2it6nfCd4uvsnhvNSp8SewCv3nhj`. After this, the mint's hook is `11111111111111111111111111111111` (revoked). `migrateToDammV2` (config `DAMM_V2_MIGRATION_FEE_ADDRESS[6]`) `61VorSrsQnLiTdEZzYeEhGpj8p6GpqvJRAjxNFXogeRKkAMugcWQxaFLRrfXnEXD6Si4waneLvqrf74f4Cxmqgy4`; DAMM v2 pool `fPxp64BdEoZZAsFJqkZF4aNCYvL2XL5SmVnxVrfiexP` exists. Trading on DAMM v2 was not exercised. |
+
+## H5 migration test (A26, report only)
+
+Nothing was re-run for A26. The H5 run above (`scripts/chain/h5-migrate.ts`) already answers the question. Findings:
+
+- **Migration works for a hook pool.** A pool filled past its threshold migrates to DAMM v2 via `migrateToDammV2` (fee option 6). The DAMM v2 pool account exists on devnet.
+- **DBC removes the transfer hook when the curve completes, before migration.** The mint's hook program and authority are set to `None`. After graduation the Token-2022 allowlist no longer blocks transfers. Eligibility is enforced only up to graduation (SPEC V17, R4). Payouts are unchanged: the snapshot still pays only registered participants, and units held by unregistered wallets are unallocated.
+- **Not covered:** trading on the migrated DAMM v2 pool, holder discovery after graduation (the H6 allowlist path misses new non-registered holders, which is fine because they are unallocated anyway), and claiming the issuer / Founder Stack migration shares. The market page already says the hook is removed at graduation.
+- **Suggested follow-up (P2, devnet only):** extend `h5-migrate.ts` to do one DAMM v2 swap from a non-allowlisted wallet, then run `getBalances` + snapshot on the graduated mint.
+
+## Report-hash memo (A26)
+
+Every payout batch (`PayoutPort.transferBatch`) carries an SPL Memo v2 instruction (`MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr`), `fstack:report:<reportHash>` (78 bytes), in the same transaction as the USDC transfers. The issuer signs it. On an explorer, the payout tx is bound to the reported period's sha256. The fake chain records the memo per signature (`control.memoOf`). It has not been exercised on devnet yet.
 
 ## Ports smoke (`scripts/chain/ports-smoke.ts`, `createDevnetPorts()` end-to-end)
 

@@ -7,9 +7,10 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
-  --font-heading: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument-serif), Georgia, serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  --font-heading: var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -38,6 +39,8 @@
   --color-brand: var(--brand);
   --color-brand-soft: var(--brand-soft);
   --color-surface: var(--surface);
+  --color-faint: var(--faint);
+  --color-strong: var(--strong);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -47,72 +50,79 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Light: warm paper + ink, one emerald accent for money-in, amber for flags. */
+/*
+ * Founder Stack palette (f-stack.ai, founder-stack/web): warm paper and ink in light, near-black
+ * in dark, one coral-orange accent. Primary actions are the accent. Corners are sharp (2-4px).
+ */
 :root {
-  --background: oklch(0.985 0.003 90);
-  --surface: oklch(0.965 0.004 90);
-  --foreground: oklch(0.2 0.012 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.2 0.012 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.2 0.012 260);
-  --primary: oklch(0.24 0.02 260);
-  --primary-foreground: oklch(0.985 0.003 90);
-  --secondary: oklch(0.955 0.005 90);
-  --secondary-foreground: oklch(0.24 0.02 260);
-  --muted: oklch(0.955 0.005 90);
-  --muted-foreground: oklch(0.5 0.012 260);
-  --accent: oklch(0.955 0.005 90);
-  --accent-foreground: oklch(0.24 0.02 260);
-  --destructive: oklch(0.56 0.2 27);
-  --border: oklch(0.9 0.006 90);
-  --input: oklch(0.88 0.006 90);
-  --ring: oklch(0.6 0.1 162);
-  --brand: oklch(0.52 0.12 162);
-  --brand-soft: oklch(0.95 0.035 162);
-  --positive: oklch(0.52 0.12 162);
-  --positive-soft: oklch(0.95 0.035 162);
-  --warning: oklch(0.6 0.13 70);
-  --warning-soft: oklch(0.96 0.045 85);
-  --chart-1: oklch(0.52 0.12 162);
-  --chart-2: oklch(0.6 0.1 230);
-  --chart-3: oklch(0.7 0.12 80);
-  --chart-4: oklch(0.55 0.02 260);
-  --chart-5: oklch(0.8 0.01 260);
-  --radius: 0.625rem;
+  --background: #fbf9f8; /* bg-0 */
+  --card: #ffffff; /* bg-1 */
+  --surface: #f4f1ef; /* bg-2 */
+  --muted: #f4f1ef;
+  --secondary: #ece8e5; /* bg-3 */
+  --accent: #ece8e5;
+  --border: #eae5e1;
+  --input: #dad4cf; /* border-strong */
+  --strong: #0f0f0f; /* text-strong */
+  --foreground: #2a2724;
+  --muted-foreground: #6b6661;
+  --faint: #9c958e;
+  --card-foreground: #2a2724;
+  --popover: #ffffff;
+  --popover-foreground: #2a2724;
+  --secondary-foreground: #2a2724;
+  --accent-foreground: #0f0f0f;
+  --primary: #ec3a01;
+  --primary-foreground: #ffffff;
+  --brand: #ec3a01;
+  --brand-soft: rgba(236, 58, 1, 0.1);
+  --positive: #1f9d63;
+  --positive-soft: rgba(31, 157, 99, 0.12);
+  --warning: #b07d1e;
+  --warning-soft: rgba(176, 125, 30, 0.14);
+  --destructive: #d33548;
+  --ring: #ec3a01;
+  --chart-1: #ec3a01;
+  --chart-2: #3f7fd6;
+  --chart-3: #b07d1e;
+  --chart-4: #6b6661;
+  --chart-5: #9c958e;
+  --radius: 3px;
 }
 
 .dark {
-  --background: oklch(0.16 0.008 260);
-  --surface: oklch(0.19 0.009 260);
-  --foreground: oklch(0.95 0.004 90);
-  --card: oklch(0.2 0.009 260);
-  --card-foreground: oklch(0.95 0.004 90);
-  --popover: oklch(0.21 0.009 260);
-  --popover-foreground: oklch(0.95 0.004 90);
-  --primary: oklch(0.94 0.004 90);
-  --primary-foreground: oklch(0.2 0.012 260);
-  --secondary: oklch(0.26 0.01 260);
-  --secondary-foreground: oklch(0.95 0.004 90);
-  --muted: oklch(0.25 0.01 260);
-  --muted-foreground: oklch(0.7 0.01 260);
-  --accent: oklch(0.26 0.01 260);
-  --accent-foreground: oklch(0.95 0.004 90);
-  --destructive: oklch(0.68 0.18 25);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.7 0.12 162);
-  --brand: oklch(0.74 0.13 162);
-  --brand-soft: oklch(0.3 0.05 162);
-  --positive: oklch(0.76 0.13 162);
-  --positive-soft: oklch(0.29 0.05 162);
-  --warning: oklch(0.8 0.13 80);
-  --warning-soft: oklch(0.3 0.05 75);
-  --chart-1: oklch(0.74 0.13 162);
-  --chart-2: oklch(0.7 0.1 230);
-  --chart-3: oklch(0.8 0.12 80);
-  --chart-4: oklch(0.6 0.02 260);
-  --chart-5: oklch(0.4 0.01 260);
+  --background: #0f0f0f;
+  --card: #181818;
+  --surface: #202020;
+  --muted: #202020;
+  --secondary: #292929;
+  --accent: #292929;
+  --border: #2b2b2b;
+  --input: #3a3a3a;
+  --strong: #ffffff;
+  --foreground: #e7e7e7;
+  --muted-foreground: #9a9a9a;
+  --faint: #666666;
+  --card-foreground: #e7e7e7;
+  --popover: #181818;
+  --popover-foreground: #e7e7e7;
+  --secondary-foreground: #e7e7e7;
+  --accent-foreground: #ffffff;
+  --primary: #fe3e01;
+  --primary-foreground: #ffffff;
+  --brand: #fe3e01;
+  --brand-soft: rgba(254, 62, 1, 0.15);
+  --positive: #46c08a;
+  --positive-soft: rgba(70, 192, 138, 0.14);
+  --warning: #e0a93f;
+  --warning-soft: rgba(224, 169, 63, 0.15);
+  --destructive: #f2495b;
+  --ring: #fe3e01;
+  --chart-1: #fe3e01;
+  --chart-2: #5b9bf0;
+  --chart-3: #e0a93f;
+  --chart-4: #9a9a9a;
+  --chart-5: #666666;
 }
 
 @layer base {
@@ -128,7 +138,20 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-feature-settings: "ss01", "cv11";
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  h1,
+  h2,
+  h3 {
+    color: var(--strong);
+    letter-spacing: -0.02em;
+  }
+  h1 {
+    letter-spacing: -0.03em;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--brand) 24%, transparent);
   }
 }
 
@@ -137,31 +160,140 @@
   font-feature-settings: "tnum" 1;
 }
 
+/* "FOUNDER STACK · MODULES": mono, tracked, accent. */
 @utility eyebrow {
-  font-size: 0.6875rem;
+  font-family: var(--font-mono);
+  font-size: 10px;
   line-height: 1rem;
-  font-weight: 500;
-  letter-spacing: 0.08em;
+  font-weight: 400;
+  letter-spacing: 0.11em;
   text-transform: uppercase;
-  color: var(--muted-foreground);
+  color: var(--brand);
 }
 
-/* Wallet adapter button, restyled to match the design system. */
+/* Table headers, stat labels, chips: mono, tracked, faint. */
+@utility label-mono {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* The one serif-italic accent word ("Entrepreneurship reimagined"). */
+@utility serif-accent {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--brand);
+}
+
+/*
+ * The f-stack.ai launch atmosphere, as a static layer behind a hero: coral mesh, a faded 64px grid
+ * and film grain. Children sit above it.
+ */
+.fs-backdrop {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+.fs-backdrop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  filter: blur(36px) saturate(1.08);
+  background:
+    radial-gradient(ellipse at 28% 22%, color-mix(in srgb, var(--brand) 42%, transparent) 0, transparent 55%),
+    radial-gradient(ellipse at 76% 16%, rgba(255, 207, 192, 0.24) 0, transparent 50%),
+    radial-gradient(ellipse at 50% 90%, color-mix(in srgb, var(--brand) 28%, transparent) 0, transparent 56%);
+  opacity: 0.55;
+  /* the glow dissolves on every side instead of stopping at the section's edges */
+  -webkit-mask-image: radial-gradient(ellipse 50% 60% at 50% 40%, #000 25%, transparent 100%);
+  mask-image: radial-gradient(ellipse 50% 60% at 50% 40%, #000 25%, transparent 100%);
+}
+.dark .fs-backdrop::before {
+  opacity: 1;
+}
+.fs-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--foreground) 9%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--foreground) 9%, transparent) 1px, transparent 1px),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.92' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.3'/%3E%3C/svg%3E");
+  background-size: 64px 64px, 64px 64px, 180px 180px;
+  -webkit-mask-image: radial-gradient(ellipse 50% 60% at 50% 40%, #000 20%, transparent 100%);
+  mask-image: radial-gradient(ellipse 50% 60% at 50% 40%, #000 20%, transparent 100%);
+  opacity: 0.6;
+}
+
+/* Wallet adapter button, restyled to match the design system (the accent button, 2px corners). */
 .wallet-adapter-button.wallet-adapter-button-trigger,
 .fs-wallet .wallet-adapter-button {
   height: 2.25rem;
   padding: 0 0.875rem;
-  border-radius: calc(var(--radius) * 0.8);
+  border-radius: 2px;
   background: var(--primary);
   color: var(--primary-foreground);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.8125rem;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1;
   gap: 0.25rem;
 }
-.wallet-adapter-button:not([disabled]):hover {
-  background: color-mix(in oklch, var(--primary), transparent 15%) !important;
+.wallet-adapter-button-trigger:not([disabled]):hover,
+.fs-wallet .wallet-adapter-button:not([disabled]):hover {
+  background: color-mix(in srgb, var(--primary), #000 12%) !important;
+}
+.wallet-adapter-modal-wrapper {
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.35);
+}
+.wallet-adapter-modal-title {
+  color: var(--strong);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.wallet-adapter-modal-button-close {
+  background: var(--muted);
+  border-radius: 2px;
+}
+.wallet-adapter-modal-button-close svg {
+  fill: var(--muted-foreground);
+}
+.wallet-adapter-modal-list .wallet-adapter-button {
+  background: transparent;
+  color: var(--foreground);
+  border-radius: 2px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+.wallet-adapter-modal-list .wallet-adapter-button:not([disabled]):hover {
+  background: var(--muted);
+}
+.wallet-adapter-modal-list .wallet-adapter-button span {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.wallet-adapter-modal-list-more {
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+}
+.wallet-adapter-modal-list-more svg {
+  fill: var(--muted-foreground);
 }
 .wallet-adapter-button-start-icon,
 .wallet-adapter-button-start-icon img {
@@ -173,22 +305,22 @@
   background: var(--popover);
   color: var(--popover-foreground);
   border: 1px solid var(--border);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 .wallet-adapter-dropdown-list-item {
   color: var(--popover-foreground);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.8125rem;
 }
 .wallet-adapter-dropdown-list-item:not([disabled]):hover {
   background: var(--muted);
 }
 .wallet-adapter-modal-wrapper {
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
 }
 
 @keyframes fs-pulse-ring {
-  0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--positive), transparent 40%); }
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--positive), transparent 40%); }
   100% { box-shadow: 0 0 0 6px transparent; }
 }
 .live-dot {

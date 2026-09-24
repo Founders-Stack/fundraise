@@ -9,8 +9,11 @@ import { GET as holdersGET } from "@/app/api/issuances/[id]/holders/route";
 import { POST as participantsPOST } from "@/app/api/issuances/[id]/participants/route";
 import { GET as quoteGET } from "@/app/api/issuances/[id]/quote/route";
 import { POST as swapPOST } from "@/app/api/issuances/[id]/swap/route";
-import { agreementAcceptanceMessage } from "@/lib/server/agreement-message";
-import { ACME, AUTH, create, ctx, launch, post, preview } from "./helpers";
+import { GET as walletGET } from "@/app/api/issuances/[id]/wallets/[wallet]/route";
+import { ELIGIBILITY_STATEMENT, agreementAcceptanceMessage } from "@/lib/server/agreement-message";
+import { ACME, AUTH, create, ctx, launch, onboard, post, preview, signer } from "./helpers";
+
+const wctx = (id: string, wallet: string) => ({ params: Promise.resolve({ id, wallet }) });
 
 describe("preview", () => {
   it("derives pricing from cash flow (Acme: $1.6M DCF, 10%, 16% → $1 / token)", async () => {
@@ -61,7 +64,7 @@ describe("create gate", () => {
     expect(c.body.dbcPool).toBeTruthy();
     expect(c.body.signatures.length).toBeGreaterThan(0);
     expect(c.body.marketUrl).toBe(`http://localhost:3000/market/${c.body.issuanceId}`);
-    expect(c.body.onboardUrl).toBe(`http://localhost:3000/onboard/${c.body.issuanceId}`);
+    expect(c.body.onboardUrl).toBe(`http://localhost:3000/onboard/${c.body.issuanceId}?invite=${c.body.inviteCode}`);
     expect(new Date(c.body.nextRecordDate).getTime()).toBeGreaterThan(Date.now());
 
     const again = await create(p.body.previewId);
@@ -105,27 +108,25 @@ describe("create gate", () => {
 });
 
 describe("participants", () => {
-  it("accepts a valid agreement signature and allowlists the wallet", async () => {
-    const { issuanceId, agreementHash } = await launch();
-    const kp = nacl.sign.keyPair();
-    const wallet = bs58.encode(kp.publicKey);
-    const msg = new TextEncoder().encode(agreementAcceptanceMessage(agreementHash, issuanceId));
-    const signature = bs58.encode(nacl.sign.detached(msg, kp.secretKey));
+  it("onboards with the invite, the checkbox and one signature, then allowlists the wallet", async () => {
+    const { issuanceId, agreementHash, inviteCode } = await launch();
+    const { wallet, signature } = signer(issuanceId, agreementHash);
 
     const res = await participantsPOST(
-      post({ wallet, displayName: "Alice", verified: true, eligible: true, agreementHash, signature }, {}),
+      post({ wallet, displayName: "Alice", eligible: true, agreementHash, signature, invite: inviteCode }, {}),
       ctx(issuanceId),
     );
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.status).toBe("Trading enabled");
     expect(body.participant.allowlistTx).toBeTruthy();
+    expect(body.participant.verification).toBe("Self-attested (pilot)");
+    // verified / eligible / accepted are set together
+    expect(body.participant.verifiedAt).toBe(body.participant.agreementAcceptedAt);
+    expect(body.participant.eligibleAt).toBe(body.participant.agreementAcceptedAt);
 
     // idempotent re-registration
-    const again = await participantsPOST(
-      post({ wallet, verified: true, eligible: true, agreementHash, signature }, {}),
-      ctx(issuanceId),
-    );
+    const again = await participantsPOST(post({ wallet, eligible: true, agreementHash, signature, invite: inviteCode }, {}), ctx(issuanceId));
     expect(again.status).toBe(200);
 
     // display names only for the issuer
@@ -138,19 +139,47 @@ describe("participants", () => {
     expect(iss.holders[0].pctOfSupply).toBe("100%");
   });
 
-  it("rejects a signature over the wrong message or by another key", async () => {
+  it("signs one message that names the issuance, the wallet, the agreement hash and the eligibility statement", async () => {
     const { issuanceId, agreementHash } = await launch();
+    const msg = agreementAcceptanceMessage({ issuanceId, wallet: "W", agreementHash });
+    expect(msg).toContain(issuanceId);
+    expect(msg).toContain("Wallet: W");
+    expect(msg).toContain(agreementHash);
+    expect(msg).toContain(ELIGIBILITY_STATEMENT);
+  });
+
+  it("requires the invite code (closed pilot)", async () => {
+    const { issuanceId, agreementHash, inviteCode, onboardUrl } = await launch();
+    expect(inviteCode).toMatch(/^[A-Za-z0-9_-]{10}$/);
+    expect(onboardUrl).toBe(`http://localhost:3000/onboard/${issuanceId}?invite=${inviteCode}`);
+    const { wallet, signature } = signer(issuanceId, agreementHash);
+    for (const invite of [undefined, "", "wrong-code", inviteCode + "x"]) {
+      const res = await participantsPOST(post({ wallet, eligible: true, agreementHash, signature, invite }, {}), ctx(issuanceId));
+      expect(res.status).toBe(403);
+      expect((await res.json()).error).toBe("invalid_invite");
+    }
+    // the invite code never leaves issuer-facing responses
+    const pub = await (await issuanceGET(new Request("http://test"), ctx(issuanceId))).json();
+    expect(JSON.stringify(pub)).not.toContain(inviteCode);
+    const pubMarket = await (await marketGET(new Request("http://test"), ctx(issuanceId))).json();
+    expect(JSON.stringify(pubMarket)).not.toContain(inviteCode);
+    const issMarket = await (await marketGET(new Request("http://test", { headers: AUTH }), ctx(issuanceId))).json();
+    expect(issMarket.onboardUrl).toBe(onboardUrl);
+  });
+
+  it("rejects a signature over the wrong message or by another key", async () => {
+    const { issuanceId, agreementHash, inviteCode } = await launch();
     const kp = nacl.sign.keyPair();
     const other = nacl.sign.keyPair();
     const wallet = bs58.encode(kp.publicKey);
+    const text = (w: string) => new TextEncoder().encode(agreementAcceptanceMessage({ issuanceId, wallet: w, agreementHash }));
     const wrongMsg = nacl.sign.detached(new TextEncoder().encode("I accept"), kp.secretKey);
-    const otherKey = nacl.sign.detached(
-      new TextEncoder().encode(agreementAcceptanceMessage(agreementHash, issuanceId)),
-      other.secretKey,
-    );
-    for (const sig of [wrongMsg, otherKey]) {
+    const otherKey = nacl.sign.detached(text(wallet), other.secretKey);
+    // a valid signature by `other` over its own message can't be replayed for `wallet`
+    const otherWallet = nacl.sign.detached(text(bs58.encode(other.publicKey)), other.secretKey);
+    for (const sig of [wrongMsg, otherKey, otherWallet]) {
       const res = await participantsPOST(
-        post({ wallet, verified: true, eligible: true, agreementHash, signature: bs58.encode(sig) }, {}),
+        post({ wallet, eligible: true, agreementHash, signature: bs58.encode(sig), invite: inviteCode }, {}),
         ctx(issuanceId),
       );
       expect(res.status).toBe(400);
@@ -158,23 +187,38 @@ describe("participants", () => {
     }
   });
 
-  it("rejects a mismatched agreement hash and missing verification", async () => {
-    const { issuanceId, agreementHash } = await launch();
-    const kp = nacl.sign.keyPair();
-    const wallet = bs58.encode(kp.publicKey);
-    const signature = bs58.encode(
-      nacl.sign.detached(new TextEncoder().encode(agreementAcceptanceMessage(agreementHash, issuanceId)), kp.secretKey),
-    );
+  it("rejects a mismatched agreement hash and an unticked checkbox", async () => {
+    const { issuanceId, agreementHash, inviteCode } = await launch();
+    const { wallet, signature } = signer(issuanceId, agreementHash);
     const bad = await participantsPOST(
-      post({ wallet, verified: true, eligible: true, agreementHash: "00".repeat(32), signature }, {}),
+      post({ wallet, eligible: true, agreementHash: "00".repeat(32), signature, invite: inviteCode }, {}),
       ctx(issuanceId),
     );
     expect((await bad.json()).error).toBe("agreement_mismatch");
-    const unverified = await participantsPOST(
-      post({ wallet, verified: false, eligible: true, agreementHash, signature }, {}),
+    const unticked = await participantsPOST(
+      post({ wallet, eligible: false, agreementHash, signature, invite: inviteCode }, {}),
       ctx(issuanceId),
     );
-    expect((await unverified.json()).error).toBe("not_verified");
+    expect((await unticked.json()).error).toBe("not_eligible");
+  });
+
+  it("reports a wallet's onboarding state and pre-flight funds", async () => {
+    const iss = await launch();
+    const { wallet } = signer(iss.issuanceId, iss.agreementHash);
+    const before = await (await walletGET(new Request("http://test"), wctx(iss.issuanceId, wallet))).json();
+    expect(before.registered).toBe(false);
+    expect(before.inviteRequired).toBe(true);
+    expect(before.funds.simulated).toBe(true);
+    expect(before.preflight).toMatchObject({ hasSol: true, hasUsdc: true, ready: true, minSol: "0.01 SOL" });
+    expect(before.message).toBe(agreementAcceptanceMessage({ issuanceId: iss.issuanceId, wallet, agreementHash: iss.agreementHash }));
+
+    const alice = await onboard(iss, "Alice");
+    const after = await (await walletGET(new Request("http://test"), wctx(iss.issuanceId, alice))).json();
+    expect(after.registered).toBe(true);
+    expect(after.participant.verification).toBe("Self-attested (pilot)");
+
+    const bad = await walletGET(new Request("http://test"), wctx(iss.issuanceId, "not-an-address"));
+    expect(bad.status).toBe(400);
   });
 });
 

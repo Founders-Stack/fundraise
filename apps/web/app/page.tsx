@@ -1,10 +1,23 @@
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, Bot, ShieldCheck, Landmark, Waves } from "lucide-react";
+import { ArrowUpRight, Bot } from "lucide-react";
 import { COPY } from "@fstack/core";
+import { currentCluster } from "@/lib/cluster";
 import { listIssuances } from "@/lib/server/issuance-record";
 import { getMarketView } from "@/lib/server/market";
 import { CodeBlock } from "@/components/code-block";
 import { bps, usd, usdCompact } from "@/components/format";
+import { TokenGlyph } from "@/components/fs";
+import { LANDING_COPY } from "@/lib/landing";
+import { loadProof } from "@/lib/server/landing-proof";
+import {
+  ForBothSides,
+  HonestFraming,
+  HowItWorks,
+  LandingFooter,
+  LiveProof,
+  PilotCta,
+  WhySolana,
+} from "@/components/landing";
 
 export const dynamic = "force-dynamic";
 
@@ -46,33 +59,29 @@ async function loadRows() {
 
 export default async function Home() {
   const rows = await loadRows();
+  const proof = await loadProof(rows);
 
   return (
     <div className="space-y-16 sm:space-y-20">
       {/* ------------------------------------------------------------ hero */}
-      <section className="grid items-center gap-10 lg:grid-cols-[1.1fr_1fr]">
+      <section className="fs-backdrop -mx-4 -mt-8 grid items-center gap-10 px-4 pt-10 pb-6 sm:-mx-6 sm:-mt-10 sm:px-6 sm:pt-14 lg:grid-cols-[1.1fr_1fr]">
         <div className="space-y-6">
-          <p className="eyebrow">Cash Flow Rights · Solana devnet</p>
-          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            Raise against your cash flow, straight from your coding agent.
+          <p className="eyebrow">Cash Flow Rights · {currentCluster().copy.networkLabel}</p>
+          <h1 className="text-[clamp(2.5rem,5.4vw,4rem)] leading-[0.92] font-semibold tracking-[-0.055em] text-balance">
+            {LANDING_COPY.hero.title}{" "}
+            <em className="serif-accent text-[1.06em] tracking-[-0.03em]">{LANDING_COPY.hero.titleAccent}</em>
           </h1>
           <p className="max-w-xl text-base text-muted-foreground text-pretty sm:text-lg">
-            Founders launch a market for a share of future Distributable Cash Flow from Claude Code or Codex.
-            Customers and fans onboard, trade on Meteora, and receive USDC each period.
+            {LANDING_COPY.hero.subline}
           </p>
           <div className="flex flex-wrap gap-3">
             <Link
-              href="#markets"
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/85"
-            >
-              Browse markets <ArrowRight className="size-4" />
-            </Link>
-            <Link
               href="#agent"
-              className="inline-flex h-10 items-center gap-2 rounded-lg border bg-card px-4 text-sm font-medium hover:bg-muted"
+              className="inline-flex h-10 items-center gap-2 rounded-[2px] bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-[color-mix(in_srgb,var(--primary),#000_12%)]"
             >
-              <Bot className="size-4" /> Operate from your agent
+              <Bot className="size-4" /> {LANDING_COPY.hero.ctaInstall}
             </Link>
+            <PilotCta href={proof.marketHref} isMainnet={proof.isMainnet} />
           </div>
           <p className="max-w-xl text-xs text-muted-foreground">
             {COPY.positioning.claim} {COPY.positioning.reported}
@@ -106,20 +115,11 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ------------------------------------------------------------ pillars */}
-      <section className="grid gap-4 sm:grid-cols-3">
-        {[
-          { icon: Landmark, title: "A contractual claim", body: COPY.positioning.claim },
-          { icon: ShieldCheck, title: "Eligible holders only", body: COPY.positioning.eligibility },
-          { icon: Waves, title: "Liquid from day one", body: COPY.positioning.meteora },
-        ].map(({ icon: Icon, title, body }) => (
-          <div key={title} className="rounded-xl border bg-card p-5">
-            <Icon className="size-5 text-brand" />
-            <h3 className="mt-3 text-sm font-medium">{title}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">{body}</p>
-          </div>
-        ))}
-      </section>
+      <HowItWorks />
+      <ForBothSides />
+      <LiveProof proof={proof} />
+      <WhySolana />
+      <HonestFraming banner={proof.banner} />
 
       {/* ------------------------------------------------------------ markets */}
       <section id="markets" className="scroll-mt-20 space-y-4">
@@ -141,7 +141,7 @@ export default async function Home() {
             <div className="hidden overflow-hidden rounded-xl border bg-card md:block">
               <table className="w-full text-sm">
                 <thead className="border-b bg-surface text-left">
-                  <tr className="[&>th]:px-4 [&>th]:py-2.5 [&>th]:text-xs [&>th]:font-medium [&>th]:text-muted-foreground">
+                  <tr className="[&>th]:px-4 [&>th]:py-2.5 [&>th]:label-mono [&>th]:font-normal">
                     <th>Issuance</th>
                     <th>Rights</th>
                     <th className="text-right">Price</th>
@@ -248,16 +248,13 @@ export default async function Home() {
           <CodeBlock label="Codex" code={CODEX} />
         </div>
       </section>
+      <LandingFooter />
     </div>
   );
 }
 
 function TokenMark({ symbol }: { symbol: string }) {
-  return (
-    <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-[11px] font-semibold tracking-tight text-brand">
-      {symbol.slice(0, 4)}
-    </span>
-  );
+  return <TokenGlyph symbol={symbol} />;
 }
 
 function YieldCell({ market }: { market: Awaited<ReturnType<typeof getMarketView>> | null }) {

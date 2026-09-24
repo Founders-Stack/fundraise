@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import type { ChainPorts, CreatePoolInput, MarketState } from "./ports";
+import type { ChainPorts, CreatePoolInput, MarketState, UnsignedTx, WalletPool } from "./ports";
 
 type Pool = {
   dbcPool: string;
@@ -25,10 +25,16 @@ type State = {
   issuerUsdc: string;
   usdc: Record<string, string>;
   slot: number;
+  /** signature -> SPL memo carried by that payout transaction */
+  memos?: Record<string, string>;
 };
 
 const ISSUER = "FakeIssuer1111111111111111111111111111111111";
+const ESCROW = "FakeEscrow111111111111111111111111111111111";
 const QUOTE_MINT = "FakeUsdc11111111111111111111111111111111111";
+/** Investor wallets aren't funded on the fake chain; the pre-flight sees this notional balance. */
+const FAKE_WALLET_LAMPORTS = 1_000_000_000n; // 1 SOL
+const FAKE_WALLET_USDC = 1_000_000n * 1_000_000n; // $1M
 
 const initialState = (): State => ({
   pools: {},
@@ -56,7 +62,29 @@ function memoryStore() {
 
 const addr = (prefix: string) => (prefix + randomBytes(24).toString("hex")).slice(0, 44);
 const ceilDiv = (a: bigint, b: bigint) => (a + b - 1n) / b;
+/** Same limit the real adapter enforces for the SPL Memo instruction. */
+function assertMemo(memo: string) {
+  if (Buffer.byteLength(memo, "utf8") > 200) throw new Error("memo longer than 200 bytes");
+}
 const sig = () => "fake_" + randomBytes(32).toString("hex");
+
+type FakeWalletTx =
+  | {
+      kind: "create_pool";
+      nonce: string;
+      creator: string;
+      pool: { dbcPool: string; baseMint: string; dbcConfig: string; authority: string };
+      tokenSupply: string;
+      startingMarketCap: string;
+      graduationMarketCap: string;
+    }
+  | { kind: "transfer"; nonce: string; from: string; rows: { wallet: string; amount: string }[] };
+
+const fakeTx = (body: FakeWalletTx, label: string): UnsignedTx => ({
+  tx: Buffer.from(JSON.stringify(body)).toString("base64"),
+  label,
+  lastValidBlockHeight: 0,
+});
 
 function priceOf(p: Pool): bigint {
   // linear from start price to graduation price as supply sells (toy model)
@@ -88,6 +116,8 @@ export interface FakeChainControl {
   setIssuerUsdc(baseUnits: bigint): void;
   issuerUsdc(): bigint;
   usdcBalance(wallet: string): bigint;
+  /** The SPL memo a payout transaction carried, if any. */
+  memoOf(signature: string): string | undefined;
 }
 
 export interface FakeChain {
@@ -97,7 +127,8 @@ export interface FakeChain {
 
 /** `file: null` keeps state in memory (tests); default is `<cwd>/.fake-chain.json` (dev server + scripts). */
 export function createFakeChain(opts: { file?: string | null } = {}): FakeChain {
-  const store = opts.file === null ? memoryStore() : fileStore(opts.file ?? join(process.cwd(), ".fake-chain.json"));
+  // Serverless filesystems are read-only: never write .fake-chain.json on Vercel.
+  const store = opts.file === null || (opts.file === undefined && process.env.VERCEL) ? memoryStore(): fileStore(opts.file ?? join(process.cwd(), ".fake-chain.json"));
   const load = store.load;
   const save = (s: State) => {
     s.slot += 1;
@@ -135,6 +166,7 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
     },
     issuerUsdc: () => BigInt(load().issuerUsdc),
     usdcBalance: (wallet) => BigInt(load().usdc[wallet] ?? "0"),
+    memoOf: (signature) => load().memos?.[signature],
   };
 
   const ports: ChainPorts = {
@@ -210,6 +242,14 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
           .map(([owner, v]) => ({ owner, tokenAccount: `ata:${owner.slice(0, 8)}`, amount: BigInt(v) }));
         return { slot: s.slot, balances };
       },
+      async getWalletFunds(mint, owner) {
+        const s = load();
+        return {
+          lamports: FAKE_WALLET_LAMPORTS,
+          quote: FAKE_WALLET_USDC + BigInt(s.usdc[owner] ?? "0"),
+          base: BigInt(s.balances[mint]?.[owner] ?? "0"),
+        };
+      },
     },
     payout: {
       quoteMint: () => QUOTE_MINT,
@@ -217,12 +257,100 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
       async getIssuerQuoteBalance() {
         return BigInt(load().issuerUsdc);
       },
-      async transferBatch(rows) {
+      async transferBatch(rows, opts) {
+        if (opts?.memo !== undefined) assertMemo(opts.memo);
         const s = load();
         const total = rows.reduce((a, r) => a + r.amount, 0n);
         if (BigInt(s.issuerUsdc) < total) throw new Error("insufficient issuer USDC");
         s.issuerUsdc = (BigInt(s.issuerUsdc) - total).toString();
         for (const r of rows) s.usdc[r.wallet] = (BigInt(s.usdc[r.wallet] ?? "0") + r.amount).toString();
+        const signature = sig();
+        if (opts?.memo) (s.memos ??= {})[signature] = opts.memo;
+        save(s);
+        return { signature };
+      },
+    },
+    escrow: {
+      address: () => ESCROW,
+      async getBalance() {
+        return BigInt(load().usdc[ESCROW] ?? "0");
+      },
+      async release(rows, opts) {
+        if (opts?.memo !== undefined) assertMemo(opts.memo);
+        const s = load();
+        const total = rows.reduce((a, r) => a + r.amount, 0n);
+        const bal = BigInt(s.usdc[ESCROW] ?? "0");
+        if (bal < total) throw new Error("insufficient escrow USDC");
+        s.usdc[ESCROW] = (bal - total).toString();
+        for (const r of rows) s.usdc[r.wallet] = (BigInt(s.usdc[r.wallet] ?? "0") + r.amount).toString();
+        const signature = sig();
+        if (opts?.memo) (s.memos ??= {})[signature] = opts.memo;
+        save(s);
+        return { signature };
+      },
+    },
+    // Wallet signing on the fake chain: a "tx" is base64 JSON describing the effect. Nothing can be
+    // signed with a real wallet, so the signed tx must equal the unsigned one (a simulated signature)
+    // and the effect is applied on submit. The founder's USDC is the fake issuer balance.
+    wallet: {
+      async buildCreatePoolTx(input, creator) {
+        const pool: WalletPool = {
+          baseMint: addr("Mint"),
+          dbcConfig: addr("Conf"),
+          dbcPool: addr("Pool"),
+          poolOwners: [addr("Auth")],
+          dbcParams: { fake: true, ...input, tokenSupply: input.tokenSupply.toString(), creator },
+        };
+        const body: FakeWalletTx = {
+          kind: "create_pool",
+          nonce: randomBytes(8).toString("hex"),
+          creator,
+          pool: { dbcPool: pool.dbcPool, baseMint: pool.baseMint, dbcConfig: pool.dbcConfig, authority: pool.poolOwners[0] },
+          tokenSupply: (input.tokenSupply * 10n ** BigInt(input.tokenDecimals)).toString(),
+          startingMarketCap: input.startingMarketCap.toString(),
+          graduationMarketCap: input.graduationMarketCap.toString(),
+        };
+        return { tx: fakeTx(body, `Create ${input.symbol} market`), pool };
+      },
+      async finalizeCreatePool() {
+        return { signatures: [sig()] };
+      },
+      async buildTransferBatchTx(from, rows) {
+        const body: FakeWalletTx = {
+          kind: "transfer",
+          nonce: randomBytes(8).toString("hex"),
+          from,
+          rows: rows.map((r) => ({ wallet: r.wallet, amount: r.amount.toString() })),
+        };
+        return fakeTx(body, `Pay ${rows.length} holder${rows.length === 1 ? "" : "s"}`);
+      },
+      async submitSigned(unsigned, signedTx, signer) {
+        if (signedTx !== unsigned.tx) throw new Error("signed transaction does not match the prepared one");
+        const body = JSON.parse(Buffer.from(unsigned.tx, "base64").toString("utf8")) as FakeWalletTx;
+        const s = load();
+        if (body.kind === "create_pool") {
+          if (body.creator !== signer) throw new Error("signer is not the pool creator");
+          const { dbcPool, baseMint, dbcConfig, authority } = body.pool;
+          s.pools[dbcPool] = {
+            dbcPool,
+            baseMint,
+            dbcConfig,
+            authority,
+            tokenSupply: body.tokenSupply,
+            startingMarketCap: body.startingMarketCap,
+            graduationMarketCap: body.graduationMarketCap,
+            quoteReserve: "0",
+            sold: "0",
+          };
+          s.allow[baseMint] = [authority];
+          s.balances[baseMint] = { [authority]: body.tokenSupply };
+        } else {
+          if (body.from !== signer) throw new Error("signer is not the payer");
+          const total = body.rows.reduce((a, r) => a + BigInt(r.amount), 0n);
+          if (BigInt(s.issuerUsdc) < total) throw new Error("insufficient USDC in the signing wallet");
+          s.issuerUsdc = (BigInt(s.issuerUsdc) - total).toString();
+          for (const r of body.rows) s.usdc[r.wallet] = (BigInt(s.usdc[r.wallet] ?? "0") + BigInt(r.amount)).toString();
+        }
         save(s);
         return { signature: sig() };
       },

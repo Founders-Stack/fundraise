@@ -1,11 +1,26 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import localFont from "next/font/local";
+import { Geist_Mono } from "next/font/google";
 import { COPY } from "@fstack/core";
 import { SolanaProvider } from "@/components/wallet-provider";
 import { SiteHeader } from "@/components/site-header";
 import "./globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
+// Founder Stack type system (f-stack.ai): Instrument Sans for text, Instrument Serif italic for the
+// one accent word, Geist Mono for labels, figures and addresses.
+const instrumentSans = localFont({
+  src: "./fonts/InstrumentSans-Variable.ttf",
+  variable: "--font-instrument-sans",
+  display: "swap",
+  weight: "400 700",
+});
+const instrumentSerif = localFont({
+  src: "./fonts/InstrumentSerif-Italic.ttf",
+  variable: "--font-instrument-serif",
+  display: "swap",
+  style: "italic",
+  weight: "400",
+});
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
@@ -18,7 +33,11 @@ const themeScript = `(function(){try{var q=new URLSearchParams(location.search).
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${instrumentSans.variable} ${instrumentSerif.variable} ${geistMono.variable} h-full antialiased`}
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
@@ -27,9 +46,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <SiteHeader />
           <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 sm:py-10">{children}</main>
           <footer className="border-t">
-            <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div className="mx-auto flex max-w-6xl flex-col gap-2 px-4 py-6 font-mono text-[10px] tracking-[0.08em] text-muted-foreground uppercase sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <p>{COPY.demoBanner}</p>
-              <p>{COPY.positioning.eligibility}</p>
+              <a href="https://f-stack.ai" target="_blank" rel="noreferrer" className="hover:text-foreground">
+                Founder Stack · f-stack.ai
+              </a>
             </div>
           </footer>
         </SolanaProvider>

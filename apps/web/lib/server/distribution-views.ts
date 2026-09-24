@@ -10,6 +10,7 @@ import {
 } from "@fstack/core";
 import type { Allocation, Distribution, Participant } from "@prisma/client";
 import { getChain } from "@/lib/chain";
+import { explorerTxUrl as clusterExplorerTxUrl } from "@/lib/cluster";
 import { pctDisplay, pctOfSupply, tokenAmount, usdc } from "./money";
 import type { IssuanceRecord } from "./issuance-record";
 
@@ -20,7 +21,7 @@ export type DistributionWithAll = Distribution & {
 };
 
 export function explorerTxUrl(signature: string, mode: "fake" | "devnet"): string | null {
-  return mode === "fake" ? null : `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
+  return mode === "fake" ? null : clusterExplorerTxUrl(signature);
 }
 
 export function executionLeaseHeld(d: Pick<Distribution, "executingUntil">, now = new Date()): boolean {
@@ -103,6 +104,12 @@ export function distributionSummary(d: Distribution) {
     unallocated: d.unallocated === null ? null : usdc(d.unallocated),
     executedAt: d.executedAt,
     createdAt: d.createdAt,
+    /** DIRECT: issuer paid every holder. ESCROW: issuer funded the claim escrow; holders claim. */
+    payoutMode: d.payoutMode,
+    merkleRoot: d.merkleRoot,
+    escrow: d.escrowFundSignature
+      ? { address: d.escrowAddress, fundSignature: d.escrowFundSignature, fundedAt: d.escrowFundedAt }
+      : null,
   };
 }
 
@@ -195,6 +202,19 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
 
   const unpaid = d.allocations.filter((a) => a.payout > 0n && !a.txSignature);
   const remaining = unpaid.reduce((s, a) => s + a.payout, 0n);
+  const escrowed = d.payoutMode === "ESCROW" && Boolean(d.escrowFundSignature);
+  const claims = escrowed
+    ? {
+        escrowAddress: d.escrowAddress,
+        fundSignature: d.escrowFundSignature,
+        fundExplorerUrl: d.escrowFundSignature ? explorerTxUrl(d.escrowFundSignature, chain.mode) : null,
+        merkleRoot: d.merkleRoot,
+        claimed: usdc(d.allocations.filter((a) => a.txSignature).reduce((s, a) => s + a.payout, 0n)),
+        unclaimed: usdc(remaining),
+        claimedCount: d.allocations.filter((a) => a.payout > 0n && a.txSignature).length,
+        unclaimedCount: unpaid.length,
+      }
+    : null;
 
   let balance: Record<string, unknown> | null = null;
   if (opts.includeBalance && d.status !== "EXECUTED" && d.totalAllocated !== null) {
@@ -249,6 +269,8 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
     balance,
     /** The exact string the founder must type back to execute (USDC decimal, not base units). */
     confirmTotal: d.status === "SNAPSHOTTED" && d.totalAllocated !== null ? usdc(d.totalAllocated).usdc : null,
+    /** Escrow mode only: funding + claim progress. */
+    claims,
     signatures: signaturesOf(d.allocations, chain.mode),
     warnings,
   };

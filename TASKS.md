@@ -92,6 +92,7 @@ Source of truth: [SPEC.md](SPEC.md). **Core feature:** `/fstack:fundraise` skill
 | U11 | Review the agreement template, positioning, and the skill confirmation wording | After A6 / A12 |
 | U12 | Mainnet is decided (SPEC section 14). Fund the mainnet wallets within the caps and send invite links only to the team + named testers | T+40h |
 | U13 | Record the ≤ 3-min split-screen video **on mainnet** at pilot scale (terminal \| browser, SPEC section 10). Rehearse on devnet with A20 first. Rehearse the agent prompts so the takes are short | T+44–50h |
+| U15 | **TODO later:** after U13, paste the video URL, hackathon URL, pilot `marketId`, pool/mint addresses and mainnet signatures into `apps/web/lib/landing.ts` (`LANDING_LINKS`, `LANDING_PILOT`), then redeploy | After U13 |
 | U14 | Final submission: repo, landing page / live URL, video, mainnet program + pool addresses and sigs, description, agent install snippet | Before Sep 25, 4:00pm ET |
 
 ---

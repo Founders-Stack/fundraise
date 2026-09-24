@@ -11,7 +11,11 @@
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "vercel-build": "prisma generate --schema prisma/postgres/schema.prisma && prisma migrate deploy --schema prisma/postgres/schema.prisma && next build",
+    "db:pg:sync": "node scripts/sync-postgres-schema.mjs",
+    "db:pg:check": "node scripts/sync-postgres-schema.mjs --check",
+    "db:pg:deploy": "prisma migrate deploy --schema prisma/postgres/schema.prisma"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

@@ -2,6 +2,7 @@
 // Demo custody (SPEC 0.4): the server holds the Founder Stack authority and issuer keys (devnet only).
 import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import bs58 from "bs58";
 import {
   Connection,
   Keypair,
@@ -13,6 +14,14 @@ import {
   ComputeBudgetProgram,
   SendTransactionError,
 } from "@solana/web3.js";
+
+import {
+  clusterAllowlistProgramId,
+  clusterQuoteMint,
+  clusterRpcUrl,
+  explorerAddressUrl,
+  explorerTxUrl,
+} from "../../cluster";
 
 export const COMMITMENT: Commitment = "confirmed";
 
@@ -37,8 +46,16 @@ function req(name: string): string {
   return v;
 }
 
-export function loadKeypair(path: string): Keypair {
-  const raw = JSON.parse(readFileSync(resolvePath(path), "utf8"));
+/**
+ * Loads a keypair from an env value. Serverless (Vercel) has no keys/ dir, so the value may be
+ * the secret itself: a JSON byte array (`[12,34,...]`) or a base58 secret key. Anything else
+ * is treated as a file path (local dev / scripts).
+ */
+export function loadKeypair(value: string): Keypair {
+  const v = value.trim();
+  if (v.startsWith("[")) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(v)));
+  if (/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(v)) return Keypair.fromSecretKey(bs58.decode(v));
+  const raw = JSON.parse(readFileSync(resolvePath(v), "utf8"));
   return Keypair.fromSecretKey(Uint8Array.from(raw));
 }
 
@@ -55,8 +72,8 @@ let cachedEnv: DevnetEnv | null = null;
 
 export function devnetEnv(opts: { requireQuoteMint?: boolean } = {}): DevnetEnv {
   if (cachedEnv && (cachedEnv.quoteMint || !opts.requireQuoteMint)) return cachedEnv;
-  const rpcUrl = process.env.RPC_URL || "https://api.devnet.solana.com";
-  const quote = process.env.QUOTE_MINT;
+  const rpcUrl = clusterRpcUrl();
+  const quote = clusterQuoteMint();
   if (opts.requireQuoteMint !== false && !quote) throw new Error("QUOTE_MINT is not set");
   const env: DevnetEnv = {
     connection: new Connection(rpcUrl, { commitment: COMMITMENT, disableRetryOnRateLimit: false }),
@@ -64,9 +81,7 @@ export function devnetEnv(opts: { requireQuoteMint?: boolean } = {}): DevnetEnv 
     fsAuthority: loadKeypair(req("FS_AUTHORITY_KEYPAIR")),
     issuer: loadKeypair(req("ISSUER_KEYPAIR")),
     quoteMint: quote ? new PublicKey(quote) : PublicKey.default,
-    allowlistProgram: new PublicKey(
-      process.env.FS_ALLOWLIST_PROGRAM_ID || "3gfXWxgHN8tjJzxXGeAEiZWaixDe7ZMxXQGnpvHkQZu7",
-    ),
+    allowlistProgram: new PublicKey(clusterAllowlistProgramId()),
   };
   if (quote) cachedEnv = env;
   return env;
@@ -176,6 +191,36 @@ export async function sendTx(
   throw new TxError(`${label}: not landed`, false);
 }
 
+/**
+ * Broadcasts a transaction a wallet already signed (SPEC 0.4 P1) and waits until it confirms,
+ * fails, or its blockhash expires. Same double-send-safe polling as sendTx; never re-signs.
+ */
+export async function sendSignedTx(
+  connection: Connection,
+  raw: Buffer | Uint8Array,
+  signature: Uint8Array,
+  lastValidBlockHeight: number,
+  label = "tx",
+): Promise<TransactionSignature> {
+  const sig = encodeSig(signature);
+  try {
+    await connection.sendRawTransaction(raw, { skipPreflight: false, preflightCommitment: COMMITMENT, maxRetries: 5 });
+  } catch (e) {
+    const err = e as Error & { logs?: string[] };
+    const msg = String(err?.message ?? e);
+    if (e instanceof SendTransactionError || /failed to send transaction|simulation failed/i.test(msg)) {
+      throw new TxError(`${label} failed (preflight): ${msg}`, false, sig, err.logs ?? []);
+    }
+  }
+  const outcome = await pollUntilFinal(connection, sig, raw, lastValidBlockHeight);
+  if (outcome.status === "confirmed") return sig;
+  if (outcome.status === "failed") {
+    const logs = await fetchLogs(connection, sig);
+    throw new TxError(`${label} failed: ${JSON.stringify(outcome.err)} sig=${sig}\n${logs.join("\n")}`, true, sig, logs);
+  }
+  throw new TxError(`${label}: not landed (blockhash expired) sig=${sig}. Open the sign link again to get a fresh transaction.`, false, sig);
+}
+
 async function pollUntilFinal(
   connection: Connection,
   sig: string,
@@ -257,8 +302,8 @@ async function fetchLogs(connection: Connection, sig: string): Promise<string[]>
   }
 }
 
-export const explorerTx = (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=devnet`;
-export const explorerAddr = (a: string) => `https://explorer.solana.com/address/${a}?cluster=devnet`;
+export const explorerTx = (sig: string) => explorerTxUrl(sig);
+export const explorerAddr = (a: string) => explorerAddressUrl(a);
 
 /** Demo test wallets (alice/bob/carol/issuer/fs-authority) live next to FS_AUTHORITY_KEYPAIR. Scripts only. */
 export function demoKeypair(name: string): Keypair {
