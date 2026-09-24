@@ -26,7 +26,8 @@ the server just **forwards your bearer token** and returns the API's JSON.
 | `fundraise_report_period` | `POST /api/issuances/:id/distributions` `{ periodLabel, dcf, reportUrl? }` | DB (DRAFT) |
 | `fundraise_list_distributions` | `GET /api/issuances/:id/distributions` (public) | — |
 | `fundraise_snapshot` | `POST /api/distributions/:id/snapshot` | DB (preview + `confirmTotal`) |
-| `fundraise_execute_distribution` | `POST /api/distributions/:id/execute` `{ confirmTotal }` | ✅ USDC |
+| `fundraise_execute_distribution` | `POST /api/distributions/:id/execute` `{ confirmTotal, payoutMode? }` (default `escrow`: fund the claim escrow; `direct`: pay holders) | ✅ USDC |
+| `fundraise_get_claim_proof` | `GET /api/distributions/:id/proof?wallet=` | — |
 | `fundraise_get_distribution` | `GET /api/distributions/:id` | — |
 | `fundraise_get_sign_request` | `GET /api/sign/:id` | — |
 

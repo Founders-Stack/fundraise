@@ -1,11 +1,18 @@
 ---
 name: fundraise-distribute
-description: Distribute a reported period's cash flow to Cash Flow Rights holders ("distribute", "pay holders", "run the distribution", "snapshot holders"). Takes the holder snapshot, shows the payout table, unallocated amount and issuer USDC balance check, then executes the USDC transfers only after the founder types the exact total, and prints the transaction signatures.
+description: Distribute a reported period's cash flow to Cash Flow Rights holders ("distribute", "pay holders", "run the distribution", "snapshot holders"). Takes the holder snapshot, shows the payout table, unallocated amount and issuer USDC balance check, then funds the claim escrow with one USDC transfer only after the founder types the exact total; holders claim their payouts with a Merkle proof on the distribution page.
 ---
 
 # fundraise-distribute
 
-Snapshot → preview → founder types the total → execute → signatures. This skill **moves USDC**.
+Snapshot → preview → founder types the total → **fund escrow** → holders claim. This skill **moves USDC**.
+
+Default flow (payoutMode `escrow`): execute sends the snapshot total from the issuer wallet into the claim
+escrow in ONE transfer and fixes a Merkle root over the payout table. Each holder then opens the distribution
+page, connects their wallet and claims; the escrow sends their payout to that wallet. Only use
+`payoutMode: "direct"` (issuer pays every holder in batches) if the founder explicitly asks for it.
+Fees stay visible: the funding transfer and every claim pay a Solana network fee (a fraction of a cent),
+and a claim may also pay rent for a new USDC account for the holder; nothing else is deducted from payouts.
 
 ## Steps
 
@@ -28,20 +35,25 @@ Snapshot → preview → founder types the total → execute → signatures. Thi
      `balance.sufficient` is false, show `balance.shortfall`, tell the founder to fund the issuer wallet
      (`balance.issuerAddress`), and stop.
    - Any `warnings`.
-4. **Ask the founder to type the total.** Say: "To send these payouts, type the exact total: **<confirmTotal>**
-   USDC." Do not proceed on "yes", "ok" or "go"; the founder must type the number. Never type or fill it in
+4. **Ask the founder to type the total.** Say: "To fund the claim escrow with these payouts, type the exact
+   total: **<confirmTotal>** USDC." Do not proceed on "yes", "ok" or "go"; the founder must type the number. Never type or fill it in
    yourself. If what they type doesn't match, show the preview total again and ask again.
-5. **Execute.** Call `fundraise_execute_distribution` with `distributionId` and `confirmTotal` = the founder's
-   typed string, verbatim.
+5. **Fund the escrow.** Call `fundraise_execute_distribution` with `distributionId` and `confirmTotal` = the
+   founder's typed string, verbatim (payoutMode defaults to `escrow`).
    - **If the response has `status: "AWAITING_SIGNATURE"`** (wallet signing mode), no USDC has moved. Say:
      "Open this link in your own browser, connect the wallet that holds the USDC, check the summary and sign
-     the payouts: `<signUrl>`. It needs `<remaining.display>` in USDC plus a little SOL for fees. Tell me when
+     the escrow funding: `<signUrl>`. It needs `<remaining.display>` in USDC plus a little SOL for fees. Tell me when
      you've signed." Then end your turn. When they come back, call `fundraise_get_sign_request` with
      `signRequestId`: `COMPLETED` → report its `result` as in step 6; `PENDING` with `error` → show it (paid
      batches stay recorded) and ask them to open the link again; `EXPIRED` → call execute again with the
      same confirmTotal for a new link. Never ask for a private key or seed phrase.
-6. **Report the result**: status EXECUTED, each signature from `signatures` with its `explorerUrl` and the
-   wallets it paid, the new `nextRecordDate`. If `chainMode` is `fake` (or `fake: true` on a signature), say the
+6. **Report the result**: status EXECUTED with `distribution.payoutMode: "ESCROW"`, the funding signature
+   (`claims.fundSignature`, `claims.fundExplorerUrl`), the escrow wallet (`claims.escrowAddress`), the Merkle root
+   (`claims.merkleRoot`), `claims.unclaimed`, and the new `nextRecordDate`. Tell the founder to share `claimUrl`
+   with holders: each holder connects their wallet there, signs a claim message (no USDC is spent to sign) and
+   receives their payout. Use `fundraise_get_distribution` later to show claim progress (`claims.claimedCount`),
+   or `fundraise_get_claim_proof` if a holder asks for their proof. In `direct` mode, instead list each
+   signature from `signatures` with its `explorerUrl` and the wallets it paid. If `chainMode` is `fake` (or `fake: true` on a signature), say the
    signatures are simulated (fake chain mode) and nothing moved on devnet. Point investors to the market page.
 
 ## Errors
@@ -51,7 +63,8 @@ Errors are `{ error, message, details }`; the fields below are under `details`.
 - `400 confirm_total_mismatch`: the typed total differs from the snapshot (or the snapshot was re-taken since
   the preview); re-show the preview, ask again.
 - `409 insufficient_balance`: show `balance`, `required`, `shortfall`; the founder funds the wallet, then retry.
-- `502 partial_execution`: some batches were paid and recorded. Show `newSignatures`, then retry
+- `502 escrow_funding_failed`: nothing was recorded; retry with the **same** confirmTotal.
+- `502 partial_execution` (direct mode): some batches were paid and recorded. Show `newSignatures`, then retry
   `fundraise_execute_distribution` with the **same** confirmTotal; only unpaid holders are paid.
 - `409 execution_in_progress`: another execute of this distribution is running. Wait a minute, then call
   `fundraise_get_distribution` to see what was paid; never snapshot again while it runs.
@@ -64,3 +77,4 @@ Errors are `{ error, message, details }`; the fields below are under `details`.
 - Never compute payouts, totals or balances yourself; show what the API returns.
 - Say "distribution" and "payout", never "dividend". Never call token market cap a "valuation".
 - Unallocated amounts are "retained by issuer", not paid to anyone.
+- Unclaimed payouts stay in escrow for the holder; never claim on a holder's behalf.

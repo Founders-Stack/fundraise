@@ -91,6 +91,13 @@ model Distribution {
   unallocated    BigInt?   // USDC base units
   executedAt     DateTime?
   executingUntil DateTime? // execution lease: set atomically by execute, cleared when it finishes
+  // Payout mode (SPEC 7): DIRECT = issuer pays every holder; ESCROW = issuer funds the claim escrow once,
+  // holders claim with a Merkle proof. Fixed once the escrow is funded.
+  payoutMode     String    @default("DIRECT") // DIRECT | ESCROW
+  merkleRoot     String?   // hex sha256 root over (distributionId, wallet, payout) leaves; set when escrow is funded
+  escrowAddress  String?   // escrow wallet the issuer funded
+  escrowFundSignature String? // the issuer -> escrow transfer
+  escrowFundedAt DateTime?
   createdAt      DateTime  @default(now())
 
   allocations Allocation[]
@@ -107,7 +114,9 @@ model Allocation {
   participant    Participant? @relation(fields: [participantId], references: [id])
   tokens         BigInt       // token base units
   payout         BigInt       // USDC base units
-  txSignature    String?
+  txSignature    String?      // DIRECT: the payout batch; ESCROW: the claim release
+  claimingUntil  DateTime?    // ESCROW claim lock: set atomically by a claim, cleared when it finishes
+  claimedAt      DateTime?
 
   @@unique([distributionId, wallet])
 }

@@ -8,7 +8,7 @@
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import type { ChainPorts, CreatePoolInput, MarketState, SwapMode, SwapQuote, UnsignedTx } from "./ports";
-import { TxError, devnetEnv, sendSignedTx, sendTx, withRetry } from "./devnet/env";
+import { TxError, devnetEnv, loadKeypair, sendSignedTx, sendTx, withRetry } from "./devnet/env";
 import { addAllowIx, isAllowed } from "./devnet/allowlist";
 import {
   DBC_POOL_AUTHORITY,
@@ -31,6 +31,7 @@ const SWAP_NETWORK_FEE_LAMPORTS = 13_000n;
 export async function createDevnetPorts(): Promise<ChainPorts> {
   const env = devnetEnv();
   const { connection, fsAuthority, issuer, quoteMint, allowlistProgram } = env;
+  const escrow = process.env.ESCROW_KEYPAIR ? loadKeypair(process.env.ESCROW_KEYPAIR) : fsAuthority;
 
   const priceOfSqrt = (sqrt: Parameters<typeof getPriceFromSqrtPrice>[0], tokenDecimals: number) =>
     BigInt(
@@ -182,6 +183,28 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
           if (e instanceof TxError) {
             throw new Error(
               `${e.message} [payout NOT applied: ${e.landed ? "transaction failed on-chain" : "transaction definitely did not land"}; safe to retry]`,
+            );
+          }
+          throw e;
+        }
+      },
+    },
+
+    // Claim escrow (SPEC 7 P1): a server-held USDC account owned by ESCROW_KEYPAIR (falls back to the
+    // Founder Stack authority). Releases pay the holder's ATA creation + fee from the escrow wallet's SOL.
+    escrow: {
+      address: () => escrow.publicKey.toBase58(),
+      async getBalance() {
+        return tokenBalance(connection, usdcAta(quoteMint, escrow.publicKey));
+      },
+      async release(rows, opts) {
+        try {
+          const { signature } = await transferBatch(connection, quoteMint, escrow, rows, opts?.memo);
+          return { signature };
+        } catch (e) {
+          if (e instanceof TxError) {
+            throw new Error(
+              `${e.message} [release NOT applied: ${e.landed ? "transaction failed on-chain" : "transaction definitely did not land"}; safe to retry]`,
             );
           }
           throw e;

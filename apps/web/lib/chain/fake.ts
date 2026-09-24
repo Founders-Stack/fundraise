@@ -30,6 +30,7 @@ type State = {
 };
 
 const ISSUER = "FakeIssuer1111111111111111111111111111111111";
+const ESCROW = "FakeEscrow111111111111111111111111111111111";
 const QUOTE_MINT = "FakeUsdc11111111111111111111111111111111111";
 /** Investor wallets aren't funded on the fake chain; the pre-flight sees this notional balance. */
 const FAKE_WALLET_LAMPORTS = 1_000_000_000n; // 1 SOL
@@ -261,6 +262,25 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
         const total = rows.reduce((a, r) => a + r.amount, 0n);
         if (BigInt(s.issuerUsdc) < total) throw new Error("insufficient issuer USDC");
         s.issuerUsdc = (BigInt(s.issuerUsdc) - total).toString();
+        for (const r of rows) s.usdc[r.wallet] = (BigInt(s.usdc[r.wallet] ?? "0") + r.amount).toString();
+        const signature = sig();
+        if (opts?.memo) (s.memos ??= {})[signature] = opts.memo;
+        save(s);
+        return { signature };
+      },
+    },
+    escrow: {
+      address: () => ESCROW,
+      async getBalance() {
+        return BigInt(load().usdc[ESCROW] ?? "0");
+      },
+      async release(rows, opts) {
+        if (opts?.memo !== undefined) assertMemo(opts.memo);
+        const s = load();
+        const total = rows.reduce((a, r) => a + r.amount, 0n);
+        const bal = BigInt(s.usdc[ESCROW] ?? "0");
+        if (bal < total) throw new Error("insufficient escrow USDC");
+        s.usdc[ESCROW] = (bal - total).toString();
         for (const r of rows) s.usdc[r.wallet] = (BigInt(s.usdc[r.wallet] ?? "0") + r.amount).toString();
         const signature = sig();
         if (opts?.memo) (s.memos ??= {})[signature] = opts.memo;

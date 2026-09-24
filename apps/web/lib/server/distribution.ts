@@ -1,6 +1,11 @@
 // Distribution lifecycle (SPEC section 7): report → snapshot → execute.
 //
 //   DRAFT ──snapshot──▶ SNAPSHOTTED ──execute──▶ EXECUTED
+//
+// Payout mode (SPEC 7, P1): `escrow` (default) funds the claim escrow with ONE issuer transfer and
+// fixes a Merkle root over the allocations; holders then claim (./escrow.ts). `direct` keeps the
+// original path: batched USDC transfers from the issuer to every holder. Either way EXECUTED means
+// the issuer has paid (to holders or into escrow) and the next record date advances.
 //                        ▲      │ (re-snapshot allowed until a payout is recorded)
 //                        └──────┘
 //
@@ -12,6 +17,7 @@
 import {
   allocate,
   batchTransfers,
+  buildClaimTree,
   computeRightsPool,
   parsePeriodLabel,
   periodLabelFormat,
@@ -53,7 +59,16 @@ async function loadDistribution(id: string): Promise<DistributionWithAll | null>
   return { ...distribution, issuance: toIssuanceRecord(issuance), participants: issuance.participants };
 }
 
-async function loadOr404(id: string): Promise<DistributionWithAll> {
+export type PayoutMode = "escrow" | "direct";
+
+/** Body `payoutMode` overrides DISTRIBUTION_PAYOUT_MODE; default "escrow". */
+export function payoutMode(override?: unknown): PayoutMode {
+  const v = override ?? process.env.DISTRIBUTION_PAYOUT_MODE ?? "escrow";
+  if (v === "escrow" || v === "direct") return v;
+  throw new HttpError(400, "invalid_payout_mode", 'payoutMode must be "escrow" or "direct"');
+}
+
+export async function loadOr404(id: string): Promise<DistributionWithAll> {
   const d = await loadDistribution(id);
   if (!d) throw new HttpError(404, "not_found", `distribution ${id} not found`);
   return d;
@@ -219,8 +234,9 @@ function assertSnapshotAllowed(
 // ---------------------------------------------------------------- execute
 
 export async function executeDistribution(id: string, input: unknown) {
-  const body = (input ?? {}) as { confirmTotal?: unknown; signingMode?: unknown };
+  const body = (input ?? {}) as { confirmTotal?: unknown; signingMode?: unknown; payoutMode?: unknown };
   const mode = signingMode(body.signingMode);
+  let payout = payoutMode(body.payoutMode);
   if (body.confirmTotal === undefined || body.confirmTotal === null || body.confirmTotal === "") {
     throw new HttpError(400, "confirm_total_required", "confirmTotal is required: the founder must type the exact total (USDC) shown in the snapshot preview");
   }
@@ -234,7 +250,10 @@ export async function executeDistribution(id: string, input: unknown) {
   const d = await loadOr404(id);
   assertExecutable(d, typed);
   if (d.status === "EXECUTED") return { ...(await distributionDetail(d, { includeBalance: false })), alreadyExecuted: true };
-  if (mode === "wallet") return requestDistributionSignature(d, typed);
+  // A funded escrow fixes the mode; direct payouts already recorded fix it the other way.
+  if (d.escrowFundSignature) payout = "escrow";
+  else if (payout === "escrow" && d.allocations.some((a) => a.txSignature)) payout = "direct";
+  if (mode === "wallet") return requestDistributionSignature(d, typed, payout);
 
   // Claim the row. `totalAllocated: typed` makes the claim fail if a re-snapshot changed the total
   // after the founder confirmed it.
@@ -251,7 +270,7 @@ export async function executeDistribution(id: string, input: unknown) {
   }
 
   try {
-    return await payClaimed(id, lease);
+    return payout === "escrow" ? await fundEscrowClaimed(id, lease) : await payClaimed(id, lease);
   } finally {
     // Release our lease unless the row was executed (which clears it) or another executor took over.
     await prisma.distribution.updateMany({ where: { id, executingUntil: lease.until }, data: { executingUntil: null } });
@@ -280,6 +299,53 @@ interface Lease {
 
 /** On-chain memo for every payout batch: ties the USDC transfer to the reported period (SPEC report hash). */
 export const reportMemo = (hash: string) => `fstack:report:${hash}`;
+
+/** Merkle tree over the payable allocations (the claim tree holders prove against). */
+export function claimTreeOf(d: Pick<DistributionWithAll, "id" | "allocations">) {
+  return buildClaimTree(d.allocations.filter((a) => a.payout > 0n).map((a) => ({ distributionId: d.id, wallet: a.wallet, payout: a.payout })));
+}
+
+/** On-chain memo on the issuer → escrow funding transfer. */
+export const escrowMemo = (hash: string) => `fstack:escrow:${hash}`;
+
+/** Escrow mode: one issuer → escrow transfer of everything still unpaid, then EXECUTED with claims open. */
+async function fundEscrowClaimed(id: string, lease: Lease) {
+  const chain = await getChain();
+  const d = await loadOr404(id);
+  const root = claimTreeOf(d).root;
+  const escrow = chain.escrow.address();
+  if (d.escrowFundSignature) return markExecuted(d, [], chain.mode, { root, escrow, signature: d.escrowFundSignature });
+
+  const remaining = d.allocations.filter((a) => a.payout > 0n && !a.txSignature).reduce((s, a) => s + a.payout, 0n);
+  const bal = await chain.payout.getIssuerQuoteBalance();
+  if (bal < remaining) {
+    throw new HttpError(409, "insufficient_balance", "issuer USDC balance is below the amount to fund into escrow", {
+      issuerAddress: chain.payout.issuerAddress(),
+      quoteMint: chain.payout.quoteMint(),
+      balance: usdc(bal),
+      required: usdc(remaining),
+      shortfall: usdc(remaining - bal),
+    });
+  }
+  let signature = "no-transfer-needed";
+  if (remaining > 0n) {
+    try {
+      ({ signature } = await chain.payout.transferBatch([{ wallet: escrow, amount: remaining }], { memo: escrowMemo(d.reportHash) }));
+    } catch (e) {
+      throw new HttpError(
+        502,
+        "escrow_funding_failed",
+        `escrow funding transfer failed: ${e instanceof Error ? e.message : String(e)}. Nothing was recorded; retry fundraise_execute_distribution with the same confirmTotal.`,
+      );
+    }
+  }
+  // Persist right away (still under our lease) so a retry never funds twice.
+  await prisma.distribution.updateMany({
+    where: { id, executingUntil: lease.until },
+    data: { payoutMode: "ESCROW", escrowFundSignature: signature, escrowAddress: escrow, escrowFundedAt: new Date(), merkleRoot: root },
+  });
+  return markExecuted(await loadOr404(id), signature === "no-transfer-needed" ? [] : [signature], chain.mode, { root, escrow, signature });
+}
 
 /** Pays every unpaid allocation of a distribution this process holds the lease on, then marks it EXECUTED. */
 async function payClaimed(id: string, lease: Lease) {
@@ -348,7 +414,12 @@ async function payClaimed(id: string, lease: Lease) {
 }
 
 /** Every payout is recorded: mark EXECUTED and move the issuance to its next record date. */
-async function markExecuted(d: DistributionWithAll, newSignatures: string[], chainMode: "fake" | "devnet") {
+async function markExecuted(
+  d: DistributionWithAll,
+  newSignatures: string[],
+  chainMode: "fake" | "devnet",
+  escrow?: { root: string; escrow: string; signature: string },
+) {
   const id = d.id;
   const executedAt = new Date();
   const frequency = d.issuance.terms.distributionFrequency;
@@ -356,7 +427,23 @@ async function markExecuted(d: DistributionWithAll, newSignatures: string[], cha
   const paidPeriod = parsePeriodLabel(d.periodLabel, frequency) ?? periodToReport(d.issuance.nextRecordDate, frequency, executedAt);
   const nextRecordDate = recordDateAfter(paidPeriod, d.issuance.nextRecordDate);
   await prisma.$transaction([
-    prisma.distribution.update({ where: { id }, data: { status: "EXECUTED", executedAt, executingUntil: null } }),
+    prisma.distribution.update({
+      where: { id },
+      data: {
+        status: "EXECUTED",
+        executedAt,
+        executingUntil: null,
+        ...(escrow
+          ? {
+              payoutMode: "ESCROW",
+              merkleRoot: escrow.root,
+              escrowAddress: escrow.escrow,
+              escrowFundSignature: escrow.signature,
+              escrowFundedAt: d.escrowFundedAt ?? executedAt,
+            }
+          : { payoutMode: "DIRECT" }),
+      },
+    }),
     prisma.issuance.update({ where: { id: d.issuanceId }, data: { nextRecordDate } }),
   ]);
 
@@ -365,10 +452,12 @@ async function markExecuted(d: DistributionWithAll, newSignatures: string[], cha
     alreadyExecuted: false,
     newSignatures,
     nextRecordDate,
+    ...(escrow ? { claimUrl: `${appUrl()}/distributions/${id}` } : {}),
     note:
-      chainMode === "fake"
-        ? "CHAIN_MODE=fake: signatures are simulated, nothing moved on devnet."
-        : "Holders can see this distribution on the market page.",
+      (chainMode === "fake" ? "CHAIN_MODE=fake: signatures are simulated, nothing moved on devnet. " : "") +
+      (escrow
+        ? "The escrow is funded. Each holder claims their payout on the distribution page (claimUrl); unclaimed USDC stays in escrow."
+        : "Holders can see this distribution on the market page."),
   };
 }
 
@@ -378,11 +467,38 @@ async function markExecuted(d: DistributionWithAll, newSignatures: string[], cha
 const MAX_TRANSFERS_PER_WALLET_TX = 5;
 
 /** Wallet mode: the confirmed total is locked into a sign request; the founder's wallet pays. */
-async function requestDistributionSignature(d: DistributionWithAll, confirmed: bigint) {
+async function requestDistributionSignature(d: DistributionWithAll, confirmed: bigint, payout: PayoutMode) {
   const unpaid = d.allocations.filter((a) => a.payout > 0n && !a.txSignature);
   const remaining = unpaid.reduce((s, a) => s + a.payout, 0n);
-  const txCount = Math.ceil(unpaid.length / MAX_TRANSFERS_PER_WALLET_TX);
   const symbol = d.issuance.terms.symbol;
+  if (payout === "escrow") {
+    const chain = await getChain();
+    const row = await openSignRequest("DISTRIBUTION_EXECUTE", d.id, {
+      title: `Fund the ${symbol} ${d.periodLabel} claim escrow`,
+      action: `Send USDC from your wallet into the claim escrow in one transfer. ${unpaid.length} holder${unpaid.length === 1 ? "" : "s"} then claim their share.`,
+      lines: [
+        { label: "Issuer", value: d.issuance.terms.issuerName },
+        { label: "Period", value: d.periodLabel },
+        { label: "Confirmed total", value: usdc(confirmed).display },
+        { label: "Into escrow", value: usdc(remaining).display },
+        { label: "Escrow wallet", value: chain.escrow.address() },
+        { label: "Holders who can claim", value: String(unpaid.length) },
+        { label: "Transactions to sign", value: remaining > 0n ? "1" : "0" },
+      ],
+      warning: "Your wallet must hold the USDC total plus a little SOL for the network fee.",
+      doneUrl: `${appUrl()}/distributions/${d.id}`,
+      meta: { confirmTotal: confirmed.toString(), payoutMode: "escrow" },
+    });
+    return awaitingSignature(row, {
+      distributionId: d.id,
+      periodLabel: d.periodLabel,
+      payoutMode: "escrow",
+      confirmTotal: usdc(confirmed),
+      remaining: usdc(remaining),
+      holders: unpaid.length,
+    });
+  }
+  const txCount = Math.ceil(unpaid.length / MAX_TRANSFERS_PER_WALLET_TX);
   const row = await openSignRequest("DISTRIBUTION_EXECUTE", d.id, {
     title: `Pay the ${symbol} ${d.periodLabel} distribution`,
     action: `Send USDC from your wallet to ${unpaid.length} holder${unpaid.length === 1 ? "" : "s"} of ${symbol}, as in the snapshot you confirmed.`,
@@ -396,10 +512,11 @@ async function requestDistributionSignature(d: DistributionWithAll, confirmed: b
     ],
     warning: "Your wallet must hold the USDC total plus a little SOL for fees and new token accounts.",
     doneUrl: `${appUrl()}/distributions/${d.id}`,
-    meta: { confirmTotal: confirmed.toString() },
+    meta: { confirmTotal: confirmed.toString(), payoutMode: "direct" },
   });
   return awaitingSignature(row, {
     distributionId: d.id,
+    payoutMode: "direct",
     periodLabel: d.periodLabel,
     confirmTotal: usdc(confirmed),
     remaining: usdc(remaining),
@@ -419,6 +536,13 @@ export async function buildDistributionSignTxs(id: string, wallet: string, meta:
   assertExecutable(d, confirmedTotalOf(meta));
   if (d.status === "EXECUTED") throw new HttpError(409, "already_executed", "this distribution was already paid");
   const chain = await getChain();
+  if (meta?.payoutMode === "escrow") {
+    if (d.escrowFundSignature) throw new HttpError(409, "already_funded", "the escrow for this distribution is already funded");
+    const remaining = d.allocations.filter((a) => a.payout > 0n && !a.txSignature).reduce((s, a) => s + a.payout, 0n);
+    if (remaining === 0n) return { txs: [], data: { escrow: true } };
+    const tx = await chain.wallet.buildTransferBatchTx(wallet, [{ wallet: chain.escrow.address(), amount: remaining }]);
+    return { txs: [{ ...tx, label: "Fund the claim escrow" }], data: { escrow: true } };
+  }
   const unpaid = d.allocations
     .filter((a) => a.payout > 0n && !a.txSignature)
     .sort((a, b) => (a.payout === b.payout ? (a.wallet < b.wallet ? -1 : 1) : a.payout > b.payout ? -1 : 1));
@@ -454,6 +578,22 @@ export async function applyDistributionSigned(
   }
   try {
     const chain = await getChain();
+    if (payload.data.escrow) {
+      let signature: string;
+      try {
+        ({ signature } = await chain.wallet.submitSigned(payload.txs[0], signedTxs[0], wallet));
+      } catch (e) {
+        throw new HttpError(502, "escrow_funding_failed", `escrow funding tx failed: ${e instanceof Error ? e.message : String(e)}. Reload the sign page to try again.`);
+      }
+      await onSignature(signature);
+      const root = claimTreeOf(await loadOr404(id)).root;
+      const escrow = chain.escrow.address();
+      await prisma.distribution.updateMany({
+        where: { id, executingUntil: lease.until },
+        data: { payoutMode: "ESCROW", escrowFundSignature: signature, escrowAddress: escrow, escrowFundedAt: new Date(), merkleRoot: root },
+      });
+      return await markExecuted(await loadOr404(id), [signature], chain.mode, { root, escrow, signature });
+    }
     const batches = payload.data.batches as string[][];
     const newSignatures: string[] = [];
     for (let i = 0; i < payload.txs.length; i++) {
