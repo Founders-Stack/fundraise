@@ -113,8 +113,9 @@ On success print:
 
 Then the two links to share:
 - **Market** (price, buy/sell, yield): `marketUrl`
-- **Investor onboarding** (verify, accept agreement, get allowlisted): `onboardUrl`. Only onboarded
-  wallets can hold the token.
+- **Investor invite link** (one checkbox + one wallet signature, then the wallet is allowlisted): `onboardUrl`.
+  It carries the invite code, so share it only with the investors you invite. Only onboarded wallets can
+  hold the token.
 
 Close with next steps: share the onboarding link; run `/fstack:fundraise` any time for status; when the
 period ends, `/fstack:fundraise-report` reports its Distributable Cash Flow.

@@ -17,7 +17,7 @@ export function ThemeToggle() {
       type="button"
       onClick={toggle}
       aria-label="Toggle light / dark theme"
-      className="inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="inline-flex size-9 items-center justify-center rounded-[3px] border border-input bg-card text-muted-foreground transition-colors hover:text-foreground"
     >
       <Sun className="hidden size-4 dark:block" />
       <Moon className="size-4 dark:hidden" />

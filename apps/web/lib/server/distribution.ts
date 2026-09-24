@@ -152,6 +152,11 @@ export async function getDistribution(id: string) {
   return distributionDetail(await loadOr404(id), { includeBalance: true });
 }
 
+/** Read-only public view for /distributions/[id]: the same detail without the issuer's live balance check. */
+export async function getPublicDistribution(id: string) {
+  return distributionDetail(await loadOr404(id), { includeBalance: false });
+}
+
 // ---------------------------------------------------------------- snapshot
 
 export async function snapshotDistribution(id: string) {

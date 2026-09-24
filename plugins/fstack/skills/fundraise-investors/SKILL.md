@@ -6,7 +6,7 @@ description: Fundraise investors - list holders and registered participants of a
 # fundraise-investors: holders and participants
 
 Read-only view of who holds the issuance's participation units (from chain balances) and who has
-onboarded (verified, eligible, accepted the agreement, allowlisted). Every number comes from the tool.
+onboarded (self-attested eligibility, signed the agreement, allowlisted). Every number comes from the tool.
 
 ## Step 1: Pick the issuance
 
