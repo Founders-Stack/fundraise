@@ -15,6 +15,7 @@ import { fmtDate, plain, usd, usdCompact } from "@/components/format";
 import { TradePanel } from "@/components/investor/trade-panel";
 import { LiveHolders } from "@/components/investor/live-holders";
 import { TokenGlyph } from "@/components/fs";
+import { PriceChart } from "@/components/price-chart";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +127,15 @@ export default async function MarketPage({ params, searchParams }: PageProps<"/m
 
         {/* ---------------------------------------------------------- content */}
         <div className="min-w-0 space-y-6 lg:col-start-1 lg:row-start-1">
+          <PriceChart
+            symbol={terms.symbol}
+            startPrice={issuance.startingMarketCap / terms.tokenSupply}
+            currentPrice={BigInt(m.price.baseUnits)}
+            graduationPrice={issuance.graduationMarketCap / terms.tokenSupply}
+            progressBps={m.progress.bps}
+            isMigrated={m.progress.isMigrated}
+          />
+
           {/* yield + history */}
           <section className="overflow-hidden rounded-xl border bg-card">
             <header className="border-b px-4 py-3 sm:px-5">

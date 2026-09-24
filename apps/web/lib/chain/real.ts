@@ -170,9 +170,9 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
        * On throw, `TxError.landed === false` (message contains "not landed"/"preflight") means it
        * definitely did not pay; a program failure (landed=true) also moved no funds.
        */
-      async transferBatch(rows) {
+      async transferBatch(rows, opts) {
         try {
-          const { signature } = await transferBatch(connection, quoteMint, issuer, rows);
+          const { signature } = await transferBatch(connection, quoteMint, issuer, rows, opts?.memo);
           return { signature };
         } catch (e) {
           if (e instanceof TxError) {

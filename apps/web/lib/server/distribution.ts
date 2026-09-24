@@ -275,6 +275,9 @@ interface Lease {
   until: Date;
 }
 
+/** On-chain memo for every payout batch: ties the USDC transfer to the reported period (SPEC report hash). */
+export const reportMemo = (hash: string) => `fstack:report:${hash}`;
+
 /** Pays every unpaid allocation of a distribution this process holds the lease on, then marks it EXECUTED. */
 async function payClaimed(id: string, lease: Lease) {
   const chain = await getChain();
@@ -302,7 +305,10 @@ async function payClaimed(id: string, lease: Lease) {
     const batch = batches[i];
     let signature: string;
     try {
-      ({ signature } = await chain.payout.transferBatch(batch.map((a) => ({ wallet: a.wallet, amount: a.payout }))));
+      ({ signature } = await chain.payout.transferBatch(
+        batch.map((a) => ({ wallet: a.wallet, amount: a.payout })),
+        { memo: reportMemo(d.reportHash) },
+      ));
     } catch (e) {
       throw new HttpError(
         502,

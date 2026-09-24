@@ -4,6 +4,7 @@ import {
   PublicKey,
   SystemProgram,
   Transaction,
+  TransactionInstruction,
   type Connection,
   type Signer,
 } from "@solana/web3.js";
@@ -67,7 +68,9 @@ export async function transferBatch(
   mint: PublicKey,
   from: Signer,
   rows: { wallet: string; amount: bigint }[],
+  memo?: string,
 ): Promise<{ signature: string; ataSignatures: string[] }> {
+  if (memo !== undefined && Buffer.byteLength(memo, "utf8") > 200) throw new Error("transferBatch: memo longer than 200 bytes");
   if (rows.length === 0) throw new Error("transferBatch: no rows");
   if (rows.length > 10) throw new Error("transferBatch: max 10 rows per transaction");
   const src = usdcAta(mint, from.publicKey);
@@ -93,7 +96,20 @@ export async function transferBatch(
       createTransferCheckedInstruction(src, mint, atas[i], from.publicKey, r.amount, USDC_DECIMALS, [], TOKEN_PROGRAM_ID),
     ),
   );
+  if (memo) tx.add(memoInstruction(memo, from.publicKey));
   // No internal re-sign: the caller retries the batch; TxError.landed=false means it definitely did not pay.
   const signature = await sendTx(connection, tx, [from], "payout transferBatch", { retryOnExpiry: false });
   return { signature, ataSignatures };
+}
+
+/** SPL Memo v2 program (same address on devnet and mainnet). */
+export const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+
+/** SPL Memo instruction signed by `signer`, built by hand to avoid the @solana/spl-memo dependency. */
+export function memoInstruction(memo: string, signer: PublicKey): TransactionInstruction {
+  return new TransactionInstruction({
+    programId: MEMO_PROGRAM_ID,
+    keys: [{ pubkey: signer, isSigner: true, isWritable: false }],
+    data: Buffer.from(memo, "utf8"),
+  });
 }
