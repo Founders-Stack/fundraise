@@ -6,7 +6,7 @@
 // mock-USDC mint authority) and ISSUER_KEYPAIR (DBC pool creator / payout source). Swaps are NOT
 // signed here: buildSwapTx returns an unsigned tx for the investor's wallet.
 import { PublicKey, Transaction } from "@solana/web3.js";
-import type { ChainPorts, CreatePoolInput, MarketState, SwapQuote } from "./ports";
+import type { ChainPorts, CreatePoolInput, MarketState, SwapMode, SwapQuote } from "./ports";
 import { TxError, devnetEnv, sendTx, withRetry } from "./devnet/env";
 import { addAllowIx, isAllowed } from "./devnet/allowlist";
 import {
@@ -88,15 +88,16 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
         };
       },
 
-      async quote(dbcPool: string, side: "BUY" | "SELL", amountIn: bigint): Promise<SwapQuote> {
+      async quote(dbcPool: string, side: "BUY" | "SELL", amount: bigint, mode: SwapMode = "EXACT_IN"): Promise<SwapQuote> {
         const pool = new PublicKey(dbcPool);
         const s = await withRetry(() => readPool(env, pool));
-        const q = await withRetry(() => quoteSwap(env, pool, side, amountIn));
+        const q = await withRetry(() => quoteSwap(env, pool, side, amount, mode === "EXACT_OUT"));
         const next = priceOfSqrt(q.nextSqrtPrice, s.tokenDecimals);
         const impact = s.price === 0n ? 0 : Number(((next > s.price ? next - s.price : s.price - next) * 10_000n) / s.price);
         return {
           side,
-          amountIn,
+          mode,
+          amountIn: q.amountIn,
           amountOut: q.amountOut,
           price: s.price,
           priceImpactBps: impact,
@@ -107,9 +108,11 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
         };
       },
 
-      async buildSwapTx(dbcPool, owner, side, amountIn, minAmountOut) {
+      async buildSwapTx(dbcPool, owner, side, amountIn, minAmountOut, mode = "EXACT_IN") {
         const tx = await withRetry(() =>
-          buildSwapTransaction(env, new PublicKey(dbcPool), new PublicKey(owner), side, amountIn, minAmountOut),
+          buildSwapTransaction(env, new PublicKey(dbcPool), new PublicKey(owner), side, amountIn, minAmountOut, {
+            exactOut: mode === "EXACT_OUT",
+          }),
         );
         const bytes = tx.serialize({ requireAllSignatures: false, verifySignatures: false });
         return { tx: Buffer.from(bytes).toString("base64") };

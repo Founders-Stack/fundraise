@@ -14,7 +14,7 @@ import type { Issuance } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getChain } from "@/lib/chain";
 import { getClassifiedHolders } from "@/lib/server/holders";
-import { HttpError, appUrl } from "./http";
+import { HttpError, appUrl, parseBaseUnits } from "./http";
 import { getIssuanceOr404, parseJson, periodsPerYear } from "./issuance";
 import { formatUnits, pctDisplay, tokenDisplay, usdc } from "./money";
 import { agreementAcceptanceMessage } from "./agreement-message";
@@ -291,17 +291,36 @@ function parseSide(v: unknown): "BUY" | "SELL" {
   return s;
 }
 
+export type SwapMode = "EXACT_IN" | "EXACT_OUT";
+
+/**
+ * Resolves the swap amount from `amountIn` (EXACT_IN, default) or `amountOut` (EXACT_OUT).
+ * `mode` is optional: passing only `amountOut` implies EXACT_OUT.
+ */
+export function parseSwapAmount(src: { amountIn?: unknown; amountOut?: unknown; mode?: unknown }): { mode: SwapMode; amount: bigint } {
+  const rawMode = typeof src.mode === "string" ? src.mode.toUpperCase() : "";
+  if (rawMode && rawMode !== "EXACT_IN" && rawMode !== "EXACT_OUT") {
+    throw new HttpError(400, "invalid_input", "mode must be EXACT_IN or EXACT_OUT");
+  }
+  const has = (v: unknown) => v !== undefined && v !== null && v !== "";
+  const mode: SwapMode = rawMode ? (rawMode as SwapMode) : !has(src.amountIn) && has(src.amountOut) ? "EXACT_OUT" : "EXACT_IN";
+  if (mode === "EXACT_OUT") return { mode, amount: parseBaseUnits(src.amountOut, "amountOut") };
+  return { mode, amount: parseBaseUnits(src.amountIn, "amountIn") };
+}
+
 /**
  * Amounts are base units: BUY amountIn = USDC base units, SELL amountIn = token base units.
+ * EXACT_OUT: `amount` is the desired output (BUY: tokens, SELL: USDC); the quote's pay side is
+ * the required input incl. fees.
  * Pool fee is assumed quote-denominated (USDC), as Meteora DBC collects fees in quote.
  */
-export async function quoteView(id: string, sideRaw: unknown, amountIn: bigint) {
+export async function quoteView(id: string, sideRaw: unknown, amount: bigint, mode: SwapMode = "EXACT_IN") {
   const issuance = await getIssuanceOr404(id);
   const { dbcPool } = requireLive(issuance);
   const side = parseSide(sideRaw);
-  if (amountIn <= 0n) throw new HttpError(400, "invalid_input", "amountIn must be > 0");
+  if (amount <= 0n) throw new HttpError(400, "invalid_input", `${mode === "EXACT_OUT" ? "amountOut" : "amountIn"} must be > 0`);
   const chain = await getChain();
-  const q = await chain.market.quote(dbcPool, side, amountIn);
+  const q = await chain.market.quote(dbcPool, side, amount, mode);
   const m = monetizationOf(issuance);
   // Meteora keeps its protocol share; only the remaining trading fee is split startup / Founder Stack.
   const tradingFee = q.poolFee - q.protocolFee;
@@ -311,6 +330,7 @@ export async function quoteView(id: string, sideRaw: unknown, amountIn: bigint) 
   const receive = side === "BUY" ? { asset: issuance.symbol, ...token(q.amountOut) } : { asset: "USDC", ...usdc(q.amountOut) };
   return {
     side,
+    mode,
     dbcPool,
     pay,
     receive,
@@ -328,19 +348,40 @@ export async function quoteView(id: string, sideRaw: unknown, amountIn: bigint) 
   };
 }
 
-export async function swapView(id: string, body: Record<string, unknown>, amountIn: bigint, minAmountOut: bigint) {
+/** Default slippage for EXACT_OUT when maxAmountIn is not given: 1%. */
+export const DEFAULT_EXACT_OUT_SLIPPAGE_BPS = 100n;
+
+/**
+ * EXACT_IN: spend `amountIn`, receive ≥ `minAmountOut`.
+ * EXACT_OUT: receive exactly `minAmountOut`, spend at most `amountIn`; `amountIn` = 0 means
+ * "quoted input + slippageBps" (body.slippageBps, default 100 = 1%).
+ */
+export async function swapView(
+  id: string,
+  body: Record<string, unknown>,
+  amountIn: bigint,
+  minAmountOut: bigint,
+  mode: SwapMode = "EXACT_IN",
+) {
   const owner = typeof body.owner === "string" ? body.owner.trim() : "";
   if (!owner) throw new HttpError(400, "invalid_input", "owner (wallet address) is required");
-  const quote = await quoteView(id, body.side, amountIn);
+  const quote = await quoteView(id, body.side, mode === "EXACT_OUT" ? minAmountOut : amountIn, mode);
+  let maxIn = amountIn;
+  if (mode === "EXACT_OUT" && maxIn === 0n) {
+    const bps = body.slippageBps === undefined ? DEFAULT_EXACT_OUT_SLIPPAGE_BPS : parseBaseUnits(body.slippageBps, "slippageBps");
+    maxIn = (quote.raw.amountIn * (10_000n + bps) + 9_999n) / 10_000n;
+  }
   const issuance = await getIssuanceOr404(id);
   const chain = await getChain();
-  const { tx } = await chain.market.buildSwapTx(issuance.dbcPool!, owner, quote.side, amountIn, minAmountOut);
+  const { tx } = await chain.market.buildSwapTx(issuance.dbcPool!, owner, quote.side, maxIn, minAmountOut, mode);
   const participant = await prisma.participant.findUnique({ where: { issuanceId_wallet: { issuanceId: id, wallet: owner } } });
   return {
     tx,
     encoding: "base64",
     owner,
+    mode,
     minAmountOut,
+    ...(mode === "EXACT_OUT" ? { amountOut: minAmountOut, maxAmountIn: maxIn } : {}),
     registered: Boolean(participant?.allowlistTx),
     warning: participant?.allowlistTx
       ? null
