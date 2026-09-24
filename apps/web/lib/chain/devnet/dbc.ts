@@ -269,7 +269,7 @@ export async function buildSwapTransaction(
   side: "BUY" | "SELL",
   amountIn: bigint,
   minAmountOut: bigint,
-  opts: { partialFill?: boolean } = {},
+  opts: { partialFill?: boolean; exactOut?: boolean } = {},
 ): Promise<Transaction> {
   const { connection, allowlistProgram } = env;
   const svc = new HookPoolService(connection, COMMITMENT);
@@ -277,16 +277,18 @@ export async function buildSwapTransaction(
   // Token-2022 resolves AllowEntry from the base-token DESTINATION owner.
   const destOwner = side === "BUY" ? owner : DBC_POOL_AUTHORITY;
   svc.hook = hookAccounts(allowlistProgram, state.baseMint, destOwner);
-  const tx = await svc.swap2WithTransferHook({
-    owner,
-    payer: owner,
-    pool,
-    swapBaseForQuote: side === "SELL",
-    swapMode: opts.partialFill ? SwapMode.PartialFill : SwapMode.ExactIn,
-    amountIn: new BN(amountIn.toString()),
-    minimumAmountOut: new BN(minAmountOut.toString()),
-    referralTokenAccount: null,
-  });
+  const common = { owner, payer: owner, pool, swapBaseForQuote: side === "SELL", referralTokenAccount: null };
+  // ExactOut: receive exactly `minAmountOut`, pay at most `amountIn`.
+  const tx = await svc.swap2WithTransferHook(
+    opts.exactOut
+      ? { ...common, swapMode: SwapMode.ExactOut, amountOut: new BN(minAmountOut.toString()), maximumAmountIn: new BN(amountIn.toString()) }
+      : {
+          ...common,
+          swapMode: opts.partialFill ? SwapMode.PartialFill : SwapMode.ExactIn,
+          amountIn: new BN(amountIn.toString()),
+          minimumAmountOut: new BN(minAmountOut.toString()),
+        },
+  );
   const out = new Transaction().add(...computeBudgetIxs(400_000, 20_000), ...tx.instructions);
   out.feePayer = owner;
   const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(COMMITMENT);
@@ -357,22 +359,26 @@ export async function readPool(env: DevnetEnv, pool: PublicKey): Promise<PoolRea
   };
 }
 
-export async function quoteSwap(env: DevnetEnv, pool: PublicKey, side: "BUY" | "SELL", amountIn: bigint) {
+/** exactOut=false: `amount` is amountIn. exactOut=true: `amount` is the desired amountOut. */
+export async function quoteSwap(env: DevnetEnv, pool: PublicKey, side: "BUY" | "SELL", amount: bigint, exactOut = false) {
   const { client, virtualPool, config } = await fetchPoolAndConfig(env, pool);
   const activationType = Number((config as unknown as { activationType: number }).activationType) as ActivationType;
   const currentPoint = await getCurrentPoint(env.connection, activationType);
-  const q = client.pool.swapQuote2({
+  const base = {
     virtualPool: virtualPool as never,
     config: config as never,
     swapBaseForQuote: side === "SELL",
     hasReferral: false,
     eligibleForFirstSwapWithMinFee: false,
     currentPoint,
-    swapMode: SwapMode.ExactIn,
-    amountIn: new BN(amountIn.toString()),
     slippageBps: 0,
-  });
+  };
+  const q = exactOut
+    ? client.pool.swapQuote2({ ...base, swapMode: SwapMode.ExactOut, amountOut: new BN(amount.toString()) })
+    : client.pool.swapQuote2({ ...base, swapMode: SwapMode.ExactIn, amountIn: new BN(amount.toString()) });
   return {
+    // ExactOut: the input incl. fees; ExactIn: the given amount.
+    amountIn: exactOut ? big(q.includedFeeInputAmount) : amount,
     amountOut: big(q.outputAmount),
     tradingFee: big(q.tradingFee),
     protocolFee: big(q.protocolFee),

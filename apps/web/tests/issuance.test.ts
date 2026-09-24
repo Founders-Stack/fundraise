@@ -8,6 +8,7 @@ import { GET as marketGET } from "@/app/api/issuances/[id]/market/route";
 import { GET as holdersGET } from "@/app/api/issuances/[id]/holders/route";
 import { POST as participantsPOST } from "@/app/api/issuances/[id]/participants/route";
 import { GET as quoteGET } from "@/app/api/issuances/[id]/quote/route";
+import { POST as swapPOST } from "@/app/api/issuances/[id]/swap/route";
 import { agreementAcceptanceMessage } from "@/lib/server/agreement-message";
 import { ACME, AUTH, create, ctx, launch, post, preview } from "./helpers";
 
@@ -216,6 +217,27 @@ describe("market", () => {
     expect(BigInt(q.fees.meteoraProtocolFee.baseUnits)).toBeGreaterThan(0n);
     expect(q.fees.networkFee.lamports).toBeTruthy();
     const bad = await quoteGET(new Request("http://test/q?side=HOLD&amountIn=1"), ctx(issuanceId));
+    expect(bad.status).toBe(400);
+  });
+
+  it("quotes and builds an exact-output buy (receive exactly N tokens)", async () => {
+    const { issuanceId } = await launch();
+    const res = await quoteGET(new Request("http://test/q?side=BUY&amountOut=100000000000"), ctx(issuanceId));
+    const q = await res.json();
+    expect(res.status).toBe(200);
+    expect(q.mode).toBe("EXACT_OUT");
+    expect(q.receive.baseUnits).toBe("100000000000");
+    const needed = BigInt(q.pay.baseUnits);
+    expect(needed).toBeGreaterThan(100_000_000_000n); // ~$1/token plus fees
+
+    const swap = await swapPOST(post({ owner: "Buyer1111111111111111111111111111111111111", side: "BUY", amountOut: "100000000000" }, {}), ctx(issuanceId));
+    const body = await swap.json();
+    expect(swap.status).toBe(200);
+    expect(body.mode).toBe("EXACT_OUT");
+    expect(body.amountOut).toBe("100000000000");
+    expect(BigInt(body.maxAmountIn)).toBe((needed * 10_100n + 9_999n) / 10_000n); // default 1% slippage
+
+    const bad = await quoteGET(new Request("http://test/q?side=BUY&amountOut=1&mode=EXACT_SIDEWAYS"), ctx(issuanceId));
     expect(bad.status).toBe(400);
   });
 });

@@ -8,3 +8,6 @@ export { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, getMint, getTrans
 export * from "./holders";
 export { ACME_DEMO_TERMS, DEMO_PROTOCOL_CONFIG, deriveLaunchPricing, toDbcFeeParams } from "@fstack/core";
 export { DAMM_V2_MIGRATION_FEE_ADDRESS, DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
+// For scripts/demo-e2e.ts (investor signMessage over the agreement text).
+export { default as nacl } from "tweetnacl";
+export { default as bs58 } from "bs58";

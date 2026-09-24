@@ -55,6 +55,7 @@ function memoryStore() {
 }
 
 const addr = (prefix: string) => (prefix + randomBytes(24).toString("hex")).slice(0, 44);
+const ceilDiv = (a: bigint, b: bigint) => (a + b - 1n) / b;
 const sig = () => "fake_" + randomBytes(32).toString("hex");
 
 function priceOf(p: Pool): bigint {
@@ -171,14 +172,24 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
         if (!p) throw new Error(`unknown pool ${dbcPool}`);
         return state(p);
       },
-      async quote(dbcPool, side, amountIn) {
+      async quote(dbcPool, side, amount, mode = "EXACT_IN") {
         const p = load().pools[dbcPool];
         if (!p) throw new Error(`unknown pool ${dbcPool}`);
         const price = priceOf(p);
+        let amountIn: bigint;
+        let amountOut: bigint;
+        if (mode === "EXACT_OUT") {
+          // Invert the toy pricing: net input needed (rounded up), then gross up for the 1% fee.
+          amountOut = amount;
+          const net = side === "BUY" ? ceilDiv(amount * price, 1_000_000n) : ceilDiv(amount * 1_000_000n, price);
+          amountIn = ceilDiv(net * 100n, 99n);
+        } else {
+          amountIn = amount;
+          const net = amountIn - amountIn / 100n;
+          amountOut = side === "BUY" ? (net * 1_000_000n) / price : (net * price) / 1_000_000n;
+        }
         const fee = amountIn / 100n;
-        const net = amountIn - fee;
-        const amountOut = side === "BUY" ? (net * 1_000_000n) / price : (net * price) / 1_000_000n;
-        return { side, amountIn, amountOut, price, priceImpactBps: 50, poolFee: fee, protocolFee: fee / 5n, networkFeeLamports: 5000n };
+        return { side, mode, amountIn, amountOut, price, priceImpactBps: 50, poolFee: fee, protocolFee: fee / 5n, networkFeeLamports: 5000n };
       },
       async buildSwapTx() {
         return { tx: Buffer.from("fake-unsigned-tx").toString("base64") };

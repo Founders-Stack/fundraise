@@ -45,8 +45,15 @@ export interface MarketState {
   accruedFees: { creator: bigint; partner: bigint };
 }
 
+/**
+ * EXACT_IN (default): `amountIn` is fixed, `amountOut` is the estimate.
+ * EXACT_OUT: `amountOut` is fixed (e.g. exactly 100,000 tokens), `amountIn` is the required input incl. fees.
+ */
+export type SwapMode = "EXACT_IN" | "EXACT_OUT";
+
 export interface SwapQuote {
   side: "BUY" | "SELL";
+  mode?: SwapMode;
   amountIn: bigint;
   amountOut: bigint;
   price: bigint;
@@ -62,14 +69,20 @@ export interface SwapQuote {
 export interface MarketPort {
   createIssuancePool(input: CreatePoolInput): Promise<CreatePoolResult>;
   getMarketState(dbcPool: string): Promise<MarketState>;
-  quote(dbcPool: string, side: "BUY" | "SELL", amountIn: bigint): Promise<SwapQuote>;
-  /** Unsigned, base64-serialized transaction for the investor's wallet to sign. */
+  /** `amount` is amountIn for EXACT_IN (default) and the desired amountOut for EXACT_OUT. */
+  quote(dbcPool: string, side: "BUY" | "SELL", amount: bigint, mode?: SwapMode): Promise<SwapQuote>;
+  /**
+   * Unsigned, base64-serialized transaction for the investor's wallet to sign.
+   * EXACT_IN (default): spend `amountIn`, receive ≥ `minAmountOut`.
+   * EXACT_OUT: receive exactly `minAmountOut`, spend at most `amountIn` (= maximumAmountIn).
+   */
   buildSwapTx(
     dbcPool: string,
     owner: string,
     side: "BUY" | "SELL",
     amountIn: bigint,
     minAmountOut: bigint,
+    mode?: SwapMode,
   ): Promise<{ tx: string }>;
 }
 
