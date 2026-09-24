@@ -25,6 +25,8 @@ type State = {
   issuerUsdc: string;
   usdc: Record<string, string>;
   slot: number;
+  /** signature -> SPL memo carried by that payout transaction */
+  memos?: Record<string, string>;
 };
 
 const ISSUER = "FakeIssuer1111111111111111111111111111111111";
@@ -59,6 +61,10 @@ function memoryStore() {
 
 const addr = (prefix: string) => (prefix + randomBytes(24).toString("hex")).slice(0, 44);
 const ceilDiv = (a: bigint, b: bigint) => (a + b - 1n) / b;
+/** Same limit the real adapter enforces for the SPL Memo instruction. */
+function assertMemo(memo: string) {
+  if (Buffer.byteLength(memo, "utf8") > 200) throw new Error("memo longer than 200 bytes");
+}
 const sig = () => "fake_" + randomBytes(32).toString("hex");
 
 function priceOf(p: Pool): bigint {
@@ -91,6 +97,8 @@ export interface FakeChainControl {
   setIssuerUsdc(baseUnits: bigint): void;
   issuerUsdc(): bigint;
   usdcBalance(wallet: string): bigint;
+  /** The SPL memo a payout transaction carried, if any. */
+  memoOf(signature: string): string | undefined;
 }
 
 export interface FakeChain {
@@ -138,6 +146,7 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
     },
     issuerUsdc: () => BigInt(load().issuerUsdc),
     usdcBalance: (wallet) => BigInt(load().usdc[wallet] ?? "0"),
+    memoOf: (signature) => load().memos?.[signature],
   };
 
   const ports: ChainPorts = {
@@ -228,14 +237,17 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
       async getIssuerQuoteBalance() {
         return BigInt(load().issuerUsdc);
       },
-      async transferBatch(rows) {
+      async transferBatch(rows, opts) {
+        if (opts?.memo !== undefined) assertMemo(opts.memo);
         const s = load();
         const total = rows.reduce((a, r) => a + r.amount, 0n);
         if (BigInt(s.issuerUsdc) < total) throw new Error("insufficient issuer USDC");
         s.issuerUsdc = (BigInt(s.issuerUsdc) - total).toString();
         for (const r of rows) s.usdc[r.wallet] = (BigInt(s.usdc[r.wallet] ?? "0") + r.amount).toString();
+        const signature = sig();
+        if (opts?.memo) (s.memos ??= {})[signature] = opts.memo;
         save(s);
-        return { signature: sig() };
+        return { signature };
       },
     },
   };

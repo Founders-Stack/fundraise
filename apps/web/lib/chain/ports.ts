@@ -109,8 +109,12 @@ export interface PayoutPort {
   quoteMint(): string;
   issuerAddress(): string;
   getIssuerQuoteBalance(): Promise<bigint>;
-  /** Transfers USDC from the issuer to each wallet in ONE transaction (caller batches ≤ 10). */
-  transferBatch(rows: { wallet: string; amount: bigint }[]): Promise<{ signature: string }>;
+  /**
+   * Transfers USDC from the issuer to each wallet in ONE transaction (caller batches ≤ 10).
+   * `memo` (≤ 200 bytes UTF-8) is written into the same transaction as an SPL Memo instruction, so the
+   * payout is tied on-chain to the report it pays (e.g. `fstack:report:<reportHash>`).
+   */
+  transferBatch(rows: { wallet: string; amount: bigint }[], opts?: { memo?: string }): Promise<{ signature: string }>;
 }
 
 export interface ChainPorts {

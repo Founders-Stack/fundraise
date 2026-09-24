@@ -39,6 +39,19 @@ Faucet: issuer 10,000,000 USDC (`hgghkdeaxQdhPyzDZxKSGdYc2nVSLgpjAaoaocMEzULny9X
 | H8: start price | **PASS (0.00 %)** | pool price at creation = 1,000,000 base units = $1.000000. A 1 USDC buy quote → 0.899999 token (10% launch fee). **Note:** SDK `buildCurveWithMarketCap` throws `Not enough liquidity … amountLeft ~357` for $1M→$3M with a 6-dp base token (precision issue; the same inputs with 9 dp work). `buildCurveWithMarketCapRobust` falls back to `buildCurveWithCustomSqrtPrices` with start and migration prices taken from the 9-dp build. The threshold differs by 0.0057 USDC. |
 | H5: hook pool → DAMM v2 | **PASS (migration only)** | Tiny pool `4PP4duUFgNs3trTQwQNZvstWcQJ5uzHXF1UY6onZ4Hpt` ($100→$300, threshold 134.405542 USDC). Fill with a partial-fill buy `h8vyqc9k21FpaoJXvm6P8Qt8pHFzVVTXzmytG2n7phJuuKbQzDPosc5K5Cs2it6nfCd4uvsnhvNSp8SewCv3nhj`. After this, the mint's hook is `11111111111111111111111111111111` (revoked). `migrateToDammV2` (config `DAMM_V2_MIGRATION_FEE_ADDRESS[6]`) `61VorSrsQnLiTdEZzYeEhGpj8p6GpqvJRAjxNFXogeRKkAMugcWQxaFLRrfXnEXD6Si4waneLvqrf74f4Cxmqgy4`; DAMM v2 pool `fPxp64BdEoZZAsFJqkZF4aNCYvL2XL5SmVnxVrfiexP` exists. Trading on DAMM v2 was not exercised. |
 
+## H5 migration test (A26, report only)
+
+Nothing was re-run for A26. The H5 run above (`scripts/chain/h5-migrate.ts`) already answers the question. Findings:
+
+- **Migration works for a hook pool.** A pool filled past its threshold migrates to DAMM v2 via `migrateToDammV2` (fee option 6). The DAMM v2 pool account exists on devnet.
+- **DBC removes the transfer hook when the curve completes, before migration.** The mint's hook program and authority are set to `None`. After graduation the Token-2022 allowlist no longer blocks transfers. Eligibility is enforced only up to graduation (SPEC V17, R4). Payouts are unchanged: the snapshot still pays only registered participants, and units held by unregistered wallets are unallocated.
+- **Not covered:** trading on the migrated DAMM v2 pool, holder discovery after graduation (the H6 allowlist path misses new non-registered holders, which is fine because they are unallocated anyway), and claiming the issuer / Founder Stack migration shares. The market page already says the hook is removed at graduation.
+- **Suggested follow-up (P2, devnet only):** extend `h5-migrate.ts` to do one DAMM v2 swap from a non-allowlisted wallet, then run `getBalances` + snapshot on the graduated mint.
+
+## Report-hash memo (A26)
+
+Every payout batch (`PayoutPort.transferBatch`) carries an SPL Memo v2 instruction (`MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr`), `fstack:report:<reportHash>` (78 bytes), in the same transaction as the USDC transfers. The issuer signs it. On an explorer, the payout tx is bound to the reported period's sha256. The fake chain records the memo per signature (`control.memoOf`). It has not been exercised on devnet yet.
+
 ## Ports smoke (`scripts/chain/ports-smoke.ts`, `createDevnetPorts()` end-to-end)
 
 - `createIssuancePool` in **5.1 s** (2 txs): pool `2mMMkmRXqSE259tLrNGu3ZM1r8HkwEpypSdwrrhsyf3a`, mint `QhjeQDFjGGE4kvDAVRwSkAXSJihzeZQcXBmUuVBURJ7`. Sigs `2kGrVmwVfS48vykoNqMmSYAh5ZSH1ZST2zrypMVpYmT33ssLdk7gNjFFBhqfaeNZDojGuxUc6HJJh2YVsKuqUQ7s`, `56eLc9V87rikG4ZHPea1YQ8pfnW6PBZLQXZwt7Js7KMVho9gNRwDtCenitCbNzAuXbMCC3GXDp87Nge4iRD7THV5`. (The spike's create took 3.5 s.)
