@@ -1,5 +1,5 @@
 {
-  "name": "@fstack/mcp",
+  "name": "fstack-mcp",
   "version": "0.1.0",
   "description": "Founder Stack MCP server: thin typed tools over the /capital API",
   "type": "module",
@@ -11,7 +11,17 @@
     "dist",
     "README.md"
   ],
+  "keywords": ["mcp", "model-context-protocol", "solana", "founder-stack"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Founders-Stack/fundraise.git",
+    "directory": "packages/fstack-mcp"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "prepublishOnly": "npm run build",
     "build": "tsc -p tsconfig.json && chmod +x dist/index.js",
     "dev": "tsc -p tsconfig.json --watch",
     "start": "node dist/index.js",

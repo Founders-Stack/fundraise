@@ -34,7 +34,7 @@ cleanup() {
 trap cleanup EXIT
 
 command -v jq >/dev/null || { echo "jq is required"; exit 2; }
-[[ -f "$MCP_JS" ]] || (cd "$ROOT" && pnpm --filter @fstack/mcp build)
+[[ -f "$MCP_JS" ]] || (cd "$ROOT" && pnpm --filter fstack-mcp build)
 
 # 1. API up?
 if ! curl -s -o /dev/null "http://localhost:$PORT/api/issuances"; then

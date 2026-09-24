@@ -97,7 +97,8 @@ export interface FakeChain {
 
 /** `file: null` keeps state in memory (tests); default is `<cwd>/.fake-chain.json` (dev server + scripts). */
 export function createFakeChain(opts: { file?: string | null } = {}): FakeChain {
-  const store = opts.file === null ? memoryStore() : fileStore(opts.file ?? join(process.cwd(), ".fake-chain.json"));
+  // Serverless filesystems are read-only: never write .fake-chain.json on Vercel.
+  const store = opts.file === null || (opts.file === undefined && process.env.VERCEL) ? memoryStore(): fileStore(opts.file ?? join(process.cwd(), ".fake-chain.json"));
   const load = store.load;
   const save = (s: State) => {
     s.slot += 1;
