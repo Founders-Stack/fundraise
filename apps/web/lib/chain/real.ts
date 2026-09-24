@@ -6,6 +6,7 @@
 // mock-USDC mint authority) and ISSUER_KEYPAIR (DBC pool creator / payout source). Swaps are NOT
 // signed here: buildSwapTx returns an unsigned tx for the investor's wallet.
 import { PublicKey, Transaction } from "@solana/web3.js";
+import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import type { ChainPorts, CreatePoolInput, MarketState, SwapMode, SwapQuote } from "./ports";
 import { TxError, devnetEnv, sendTx, withRetry } from "./devnet/env";
 import { addAllowIx, isAllowed } from "./devnet/allowlist";
@@ -142,6 +143,17 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
           slot: r.slot,
           balances: r.holders.map((h) => ({ owner: h.owner, tokenAccount: h.tokenAccount, amount: h.amount })),
         };
+      },
+
+      async getWalletFunds(mint: string, owner: string) {
+        const o = new PublicKey(owner);
+        const unitsAta = getAssociatedTokenAddressSync(new PublicKey(mint), o, false, TOKEN_2022_PROGRAM_ID);
+        const [lamports, quote, base] = await Promise.all([
+          withRetry(() => connection.getBalance(o)),
+          tokenBalance(connection, usdcAta(quoteMint, o)),
+          tokenBalance(connection, unitsAta),
+        ]);
+        return { lamports: BigInt(lamports), quote, base };
       },
     },
 

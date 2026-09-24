@@ -18,17 +18,17 @@ export const COPY = {
   demoCustody: "Demo custody (devnet)",
   demoBanner: "DEMO — devnet prototype, not an offer of securities",
   nextRecordDate: "Next record date",
+  // One screen, one signature (SPEC section 6). There is no identity step: `verifiedAt` means self-attested.
   onboardingSteps: {
-    verifyIdentity: "Verify identity",
-    confirmEligibility: "Confirm eligibility",
-    acceptAgreement: "Accept agreement",
+    connectWallet: "Connect wallet",
+    acceptAgreement: "Accept and sign",
     tradingEnabled: "Trading enabled",
   },
+  selfAttested: "Self-attested (pilot)",
 } as const;
 
 export const ONBOARDING_STEP_LABELS = [
-  COPY.onboardingSteps.verifyIdentity,
-  COPY.onboardingSteps.confirmEligibility,
+  COPY.onboardingSteps.connectWallet,
   COPY.onboardingSteps.acceptAgreement,
   COPY.onboardingSteps.tradingEnabled,
 ] as const;

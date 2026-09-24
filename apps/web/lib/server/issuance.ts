@@ -25,6 +25,7 @@ import {
   attachMarket,
   deleteIssuance,
   insertPendingIssuance,
+  onboardUrl,
   requireMarket,
   type IssuanceRecord,
 } from "./issuance-record";
@@ -365,7 +366,9 @@ export async function createIssuance(previewId: unknown) {
     agreementHash: done.agreement.hash,
     nextRecordDate: done.nextRecordDate,
     marketUrl: `${appUrl()}/market/${done.id}`,
-    onboardUrl: `${appUrl()}/onboard/${done.id}`,
+    /** Share this with investors: it carries the invite code onboarding requires. */
+    onboardUrl: onboardUrl(done, true),
+    inviteCode: done.inviteCode,
     custody: COPY.demoCustody,
   };
 }
@@ -419,7 +422,7 @@ export function publicIssuanceView(rec: IssuanceRecord) {
     fees: { mode: rec.monetization.mode, description: describeFees(rec.monetization) },
     nextRecordDate: rec.nextRecordDate,
     marketUrl: `${appUrl()}/market/${rec.id}`,
-    onboardUrl: `${appUrl()}/onboard/${rec.id}`,
+    onboardUrl: onboardUrl(rec, false),
     custody: COPY.demoCustody,
     createdAt: rec.createdAt,
   };

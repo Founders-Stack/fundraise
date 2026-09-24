@@ -149,7 +149,9 @@ describe("COPY / lintCopy", () => {
     walk(COPY);
     expect(strings.length).toBeGreaterThan(10);
     for (const s of strings) expect(lintCopy(s)).toEqual([]);
-    expect(COPY.onboardingSteps.verifyIdentity).toBe("Verify identity");
+    // SPEC 6.1: no simulated identity step; verification is labeled self-attested.
+    expect(Object.keys(COPY.onboardingSteps)).toEqual(["connectWallet", "acceptAgreement", "tradingEnabled"]);
+    expect(COPY.selfAttested).toBe("Self-attested (pilot)");
   });
 
   it("flags forbidden terms, allows negated ones", () => {

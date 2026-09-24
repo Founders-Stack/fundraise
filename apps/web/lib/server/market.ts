@@ -1,4 +1,5 @@
 // Market, holders, quote/swap and participant onboarding views (SPEC sections 6, 9, R7).
+import { timingSafeEqual } from "node:crypto";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 import {
@@ -14,9 +15,9 @@ import { prisma } from "@/lib/db";
 import { getChain } from "@/lib/chain";
 import { getClassifiedHolders } from "@/lib/server/holders";
 import { HttpError, appUrl, parseBaseUnits } from "./http";
-import { loadIssuance, requireMarket } from "./issuance-record";
+import { loadIssuance, onboardUrl, requireMarket, type IssuanceRecord } from "./issuance-record";
 import { formatUnits, pctDisplay, pctOfSupply, tokenAmount, usdc } from "./money";
-import { agreementAcceptanceMessage } from "./agreement-message";
+import { ELIGIBILITY_STATEMENT, agreementAcceptanceMessage } from "./agreement-message";
 
 export function progressBar(bps: number, width = 20): string {
   const clamped = Math.max(0, Math.min(10_000, bps));
@@ -26,7 +27,9 @@ export function progressBar(bps: number, width = 20): string {
 
 // ---------------------------------------------------------------- market
 
-export async function getMarketView(id: string, now = new Date()) {
+/** `isIssuer`: the caller holds the API token, so `onboardUrl` carries the invite code (the link to share). */
+export async function getMarketView(id: string, opts: { isIssuer?: boolean; now?: Date } = {}) {
+  const now = opts.now ?? new Date();
   const issuance = await loadIssuance(id);
   const { dbcPool } = requireMarket(issuance);
   const { terms, monetization } = issuance;
@@ -114,7 +117,7 @@ export async function getMarketView(id: string, now = new Date()) {
       note: COPY.positioning.economics,
     },
     marketUrl: `${appUrl()}/market/${id}`,
-    onboardUrl: `${appUrl()}/onboard/${id}`,
+    onboardUrl: onboardUrl(issuance, opts.isIssuer === true),
   };
 }
 
@@ -203,6 +206,20 @@ export function verifyAcceptanceSignature(wallet: string, message: string, signa
   return nacl.sign.detached.verify(new TextEncoder().encode(message), sig, pub);
 }
 
+function inviteMatches(issuance: IssuanceRecord, invite: unknown): boolean {
+  if (!issuance.inviteCode) return true; // issuances from before invite codes
+  if (typeof invite !== "string") return false;
+  const a = Buffer.from(invite.trim());
+  const b = Buffer.from(issuance.inviteCode);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * One-signature onboarding (SPEC section 6): invite code + checkbox (`eligible: true`) + one
+ * signMessage over { issuanceId, wallet, agreementHash, eligibilityStatement }. On success the
+ * verified/eligible/accepted timestamps are set together ("Self-attested (pilot)") and the wallet
+ * is allowlisted on the transfer hook. No simulated identity step.
+ */
 export async function registerParticipant(id: string, body: Record<string, unknown>) {
   const issuance = await loadIssuance(id);
   const { baseMint } = requireMarket(issuance);
@@ -211,14 +228,16 @@ export async function registerParticipant(id: string, body: Record<string, unkno
   const displayName = typeof body.displayName === "string" ? body.displayName.trim().slice(0, 64) || null : null;
 
   if (!wallet || !signature) throw new HttpError(400, "invalid_input", "wallet and signature are required");
-  if (body.verified !== true) throw new HttpError(400, "not_verified", "Identity verification (simulated) must be completed: verified: true");
-  if (body.eligible !== true) throw new HttpError(400, "not_eligible", "Eligibility must be confirmed: eligible: true");
+  if (!inviteMatches(issuance, body.invite)) {
+    throw new HttpError(403, "invalid_invite", "This is a closed pilot: onboarding needs the invite link from the issuer");
+  }
+  if (body.eligible !== true) throw new HttpError(400, "not_eligible", `Tick "${ELIGIBILITY_STATEMENT}": eligible: true`);
   if (body.agreementHash !== issuance.agreement.hash) {
     throw new HttpError(400, "agreement_mismatch", "agreementHash does not match this issuance's agreement", {
       expected: issuance.agreement.hash,
     });
   }
-  const message = agreementAcceptanceMessage(issuance.agreement.hash, issuance.id);
+  const message = agreementAcceptanceMessage({ issuanceId: issuance.id, wallet, agreementHash: issuance.agreement.hash });
   if (!verifyAcceptanceSignature(wallet, message, signature)) {
     throw new HttpError(400, "invalid_signature", "Signature does not verify for this wallet and message", { message });
   }
@@ -262,11 +281,66 @@ export async function registerParticipant(id: string, body: Record<string, unkno
       wallet: participant.wallet,
       displayName: participant.displayName,
       verifiedAt: participant.verifiedAt,
+      verification: COPY.selfAttested,
       eligibleAt: participant.eligibleAt,
       agreementAcceptedAt: participant.agreementAcceptedAt,
       allowlistTx: participant.allowlistTx,
     },
     marketUrl: `${appUrl()}/market/${id}`,
+  };
+}
+
+/** Covers the swap network fee plus rent for the new token accounts a first buy creates. */
+export const MIN_SOL_LAMPORTS = 10_000_000n; // 0.01 SOL
+
+/**
+ * GET /api/issuances/:id/wallets/:wallet — PUBLIC. Onboarding state + pre-flight funds for one
+ * wallet, so the gate can say "you're set" or "fund this wallet first" before any signature.
+ */
+export async function walletView(id: string, walletRaw: string) {
+  const issuance = await loadIssuance(id);
+  const { baseMint } = requireMarket(issuance);
+  const wallet = walletRaw.trim();
+  let valid = false;
+  try {
+    valid = bs58.decode(wallet).length === 32;
+  } catch {
+    valid = false;
+  }
+  if (!valid) throw new HttpError(400, "invalid_input", "wallet must be a base58 Solana address");
+
+  const chain = await getChain();
+  const [participant, funds] = await Promise.all([
+    prisma.participant.findUnique({ where: { issuanceId_wallet: { issuanceId: id, wallet } } }),
+    chain.registry.getWalletFunds(baseMint, wallet),
+  ]);
+  const hasSol = funds.lamports >= MIN_SOL_LAMPORTS;
+  const hasUsdc = funds.quote > 0n;
+  return {
+    wallet,
+    registered: Boolean(participant?.agreementAcceptedAt && participant.allowlistTx),
+    participant: participant
+      ? {
+          agreementAcceptedAt: participant.agreementAcceptedAt,
+          verification: COPY.selfAttested,
+          allowlistTx: participant.allowlistTx,
+        }
+      : null,
+    inviteRequired: issuance.inviteCode !== null,
+    funds: {
+      simulated: chain.mode === "fake",
+      sol: { lamports: funds.lamports, display: `${formatUnits(funds.lamports, 9)} SOL` },
+      usdc: usdc(funds.quote),
+      units: tokenAmount(funds.base, issuance.terms.tokenDecimals, issuance.terms.symbol),
+    },
+    preflight: {
+      hasSol,
+      hasUsdc,
+      minSol: `${formatUnits(MIN_SOL_LAMPORTS, 9)} SOL`,
+      ready: hasSol && hasUsdc,
+    },
+    /** The exact text this wallet signs to accept the agreement. */
+    message: agreementAcceptanceMessage({ issuanceId: id, wallet, agreementHash: issuance.agreement.hash }),
   };
 }
 

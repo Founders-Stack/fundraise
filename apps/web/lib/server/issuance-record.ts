@@ -1,6 +1,7 @@
 // Issuance record: the only module that knows how an Issuance is stored. SQLite has no JSON
 // columns, so the market refs and monetization config are JSON strings; launch terms added later
 // are nullable with core defaults; supply is stored in whole tokens. Callers get IssuanceRecord.
+import { randomBytes } from "node:crypto";
 import type { Issuance } from "@prisma/client";
 import {
   AGREEMENT_VERSION,
@@ -14,7 +15,7 @@ import {
   type MonetizationConfig,
 } from "@fstack/core";
 import { prisma } from "@/lib/db";
-import { HttpError } from "./http";
+import { HttpError, appUrl } from "./http";
 
 /** On-chain refs of a live issuance (null on the record while it is still PENDING). */
 export interface IssuanceMarket {
@@ -44,6 +45,8 @@ export interface IssuanceRecord {
   agreement: { version: string; hash: string; text: string };
   monetization: MonetizationConfig;
   nextRecordDate: Date | null;
+  /** Closed pilot: onboarding requires this code. Issuer-only, never in public views. null = not required. */
+  inviteCode: string | null;
   /** terms.tokenSupply in base units (× 10^tokenDecimals). */
   supplyBaseUnits: bigint;
   market: IssuanceMarket | null;
@@ -122,6 +125,7 @@ export function toIssuanceRecord(row: Issuance): IssuanceRecord {
     agreement: { version: row.agreementVersion, hash: row.agreementHash, text: row.agreementText },
     monetization: monetizationOf(row),
     nextRecordDate: row.nextRecordDate,
+    inviteCode: row.inviteCode,
     supplyBaseUnits: row.tokenSupply * 10n ** BigInt(row.tokenDecimals),
     market: marketOf(row),
     createdAt: row.createdAt,
@@ -149,6 +153,15 @@ export async function listIssuances() {
   }));
 }
 
+/**
+ * The investor onboarding link. Issuer-facing responses pass `withInvite` so the link they share
+ * carries the invite code; public views never include it.
+ */
+export function onboardUrl(rec: Pick<IssuanceRecord, "id" | "inviteCode">, withInvite: boolean): string {
+  const base = `${appUrl()}/onboard/${rec.id}`;
+  return withInvite && rec.inviteCode ? `${base}?invite=${encodeURIComponent(rec.inviteCode)}` : base;
+}
+
 /** The market refs, or 409 while the issuance is still being created. */
 export function requireMarket(rec: IssuanceRecord): IssuanceMarket {
   if (!rec.market) throw new HttpError(409, "issuance_pending", `Issuance ${rec.id} has no market yet`);
@@ -167,7 +180,12 @@ export interface PendingIssuance {
   nextRecordDate: Date;
 }
 
-/** Inserts an issuance without a market (status PENDING). */
+/** Unguessable, URL-safe, short enough to read out: 10 chars of base64url. */
+function newInviteCode(): string {
+  return randomBytes(8).toString("base64url").slice(0, 10);
+}
+
+/** Inserts an issuance without a market (status PENDING), with a fresh invite code. */
 export async function insertPendingIssuance(p: PendingIssuance): Promise<IssuanceRecord> {
   const { terms } = p;
   const row = await prisma.issuance.create({
@@ -192,6 +210,7 @@ export async function insertPendingIssuance(p: PendingIssuance): Promise<Issuanc
       startingMarketCap: p.startingMarketCap,
       graduationMarketCap: p.graduationMarketCap,
       monetization: JSON.stringify(p.monetization),
+      inviteCode: newInviteCode(),
     },
   });
   return toIssuanceRecord(row);

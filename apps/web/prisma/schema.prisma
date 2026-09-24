@@ -35,6 +35,8 @@ model Issuance {
   issuerJurisdiction    String?
   dcfDefinition         String?
   recordDateRule        String?
+  // closed pilot: onboarding requires this code (SPEC section 6); NULL = not required (older rows)
+  inviteCode            String?
 
   // derived, stored
   startingMarketCap     BigInt   // USDC base units

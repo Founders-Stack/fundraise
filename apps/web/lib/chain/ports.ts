@@ -95,6 +95,14 @@ export interface RegistryPort {
    * `extraOwners` must be included even if the adapter can't discover them (e.g. pool vault owners).
    */
   getBalances(mint: string, extraOwners: string[]): Promise<{ slot: number; balances: TokenBalance[] }>;
+  /** One wallet's funds for the onboarding pre-flight (SPEC section 6): SOL in lamports, USDC and `mint` units in base units. */
+  getWalletFunds(mint: string, owner: string): Promise<WalletFunds>;
+}
+
+export interface WalletFunds {
+  lamports: bigint;
+  quote: bigint;
+  base: bigint;
 }
 
 export interface PayoutPort {

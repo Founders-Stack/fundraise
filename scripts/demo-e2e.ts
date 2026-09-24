@@ -352,7 +352,7 @@ async function main() {
     const fakeSwap: (dbcPool: string, owner: string, side: "BUY" | "SELL", tokens: bigint) => { signature: string } =
       fakeChain.createFakeChain().control.swap;
     const agreementMessage = await import(pathToFileURL(path.join(WEB_DIR, "lib/server/agreement-message.ts")).href);
-    const agreementAcceptanceMessage: (hash: string, issuanceId: string) => string =
+    const agreementAcceptanceMessage: (p: { issuanceId: string; wallet: string; agreementHash: string }) => string =
       agreementMessage.agreementAcceptanceMessage;
 
     // ---- 1. Launch: preview ----
@@ -393,6 +393,8 @@ async function main() {
     assertTrue("dbcPool present", typeof dbcPool === "string" && dbcPool.length > 0);
     assertEqual("agreement hash unchanged from preview", create.body.agreementHash, agreementHash);
     assertEqual("status LIVE", create.body.status, "LIVE");
+    const inviteCode: string = create.body.inviteCode;
+    assertTrue("invite link carries the invite code", create.body.onboardUrl.endsWith(`?invite=${inviteCode}`));
     console.log(`  issuanceId ${issuanceId}`);
     console.log(`  market:  ${create.body.marketUrl}`);
     console.log(`  onboard: ${create.body.onboardUrl}`);
@@ -419,9 +421,9 @@ async function main() {
     // ---- 3. Buy: Alice onboards and buys 100k ----
     step("Buy, in the browser: Alice onboards and buys 100,000 ACME-CF");
     const alice = makeWallet("Alice");
-    const aliceAgreementSig = alice.signMessage(agreementAcceptanceMessage(agreementHash, issuanceId));
+    const aliceAgreementSig = alice.signMessage(agreementAcceptanceMessage({ issuanceId, wallet: alice.address, agreementHash }));
     const aliceOnboard = await api("POST", `/issuances/${issuanceId}/participants`, {
-      body: { wallet: alice.address, displayName: "Alice", verified: true, eligible: true, agreementHash, signature: aliceAgreementSig },
+      body: { wallet: alice.address, displayName: "Alice", eligible: true, agreementHash, signature: aliceAgreementSig, invite: inviteCode },
     });
     assertEqual("Alice onboarding status 200", aliceOnboard.status, 200);
     assertEqual('Alice: "Trading enabled"', aliceOnboard.body.status, "Trading enabled");
@@ -483,9 +485,9 @@ async function main() {
     step("Trade, in the browser: Bob onboards; Alice sells 40,000 into the pool, Bob buys 40,000");
     await fakeSwap(dbcPool, alice.address, "SELL", 40_000n * TOKEN_UNIT);
     const bob = makeWallet("Bob");
-    const bobAgreementSig = bob.signMessage(agreementAcceptanceMessage(agreementHash, issuanceId));
+    const bobAgreementSig = bob.signMessage(agreementAcceptanceMessage({ issuanceId, wallet: bob.address, agreementHash }));
     const bobOnboard = await api("POST", `/issuances/${issuanceId}/participants`, {
-      body: { wallet: bob.address, displayName: "Bob", verified: true, eligible: true, agreementHash, signature: bobAgreementSig },
+      body: { wallet: bob.address, displayName: "Bob", eligible: true, agreementHash, signature: bobAgreementSig, invite: inviteCode },
     });
     assertEqual("Bob onboarding status 200", bobOnboard.status, 200);
     assertEqual('Bob: "Trading enabled"', bobOnboard.body.status, "Trading enabled");

@@ -29,6 +29,9 @@ type State = {
 
 const ISSUER = "FakeIssuer1111111111111111111111111111111111";
 const QUOTE_MINT = "FakeUsdc11111111111111111111111111111111111";
+/** Investor wallets aren't funded on the fake chain; the pre-flight sees this notional balance. */
+const FAKE_WALLET_LAMPORTS = 1_000_000_000n; // 1 SOL
+const FAKE_WALLET_USDC = 1_000_000n * 1_000_000n; // $1M
 
 const initialState = (): State => ({
   pools: {},
@@ -209,6 +212,14 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
           .filter(([, v]) => BigInt(v) > 0n)
           .map(([owner, v]) => ({ owner, tokenAccount: `ata:${owner.slice(0, 8)}`, amount: BigInt(v) }));
         return { slot: s.slot, balances };
+      },
+      async getWalletFunds(mint, owner) {
+        const s = load();
+        return {
+          lamports: FAKE_WALLET_LAMPORTS,
+          quote: FAKE_WALLET_USDC + BigInt(s.usdc[owner] ?? "0"),
+          base: BigInt(s.balances[mint]?.[owner] ?? "0"),
+        };
       },
     },
     payout: {
