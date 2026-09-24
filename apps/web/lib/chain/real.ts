@@ -7,19 +7,23 @@
 // signed here: buildSwapTx returns an unsigned tx for the investor's wallet.
 import { PublicKey, Transaction } from "@solana/web3.js";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
-import type { ChainPorts, CreatePoolInput, MarketState, SwapMode, SwapQuote } from "./ports";
-import { TxError, devnetEnv, sendTx, withRetry } from "./devnet/env";
+import type { ChainPorts, CreatePoolInput, MarketState, SwapMode, SwapQuote, UnsignedTx } from "./ports";
+import { TxError, devnetEnv, sendSignedTx, sendTx, withRetry } from "./devnet/env";
 import { addAllowIx, isAllowed } from "./devnet/allowlist";
 import {
   DBC_POOL_AUTHORITY,
+  buildHookPoolTxForCreator,
   buildSwapTransaction,
   createHookPool,
   getPriceFromSqrtPrice,
+  initHookAllowlist,
   quoteSwap,
   readPool,
 } from "./devnet/dbc";
 import { listHolders } from "./devnet/holders";
-import { tokenBalance, transferBatch, usdcAta } from "./devnet/usdc";
+import { buildTransferTx, tokenBalance, transferBatch, usdcAta } from "./devnet/usdc";
+
+const b64 = (tx: Transaction) => Buffer.from(tx.serialize({ requireAllSignatures: false, verifySignatures: false })).toString("base64");
 
 /** 5000 lamports/signature + priority fee (400k CU × 20k µlamports = 8000 lamports). ATA rent not included. */
 const SWAP_NETWORK_FEE_LAMPORTS = 13_000n;
@@ -182,6 +186,70 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
           }
           throw e;
         }
+      },
+    },
+
+    // SPEC 0.4 P1: the founder's wallet signs; the server only adds ephemeral / partner signatures.
+    wallet: {
+      async buildCreatePoolTx(input: CreatePoolInput, creator: string) {
+        const built = await withRetry(() =>
+          buildHookPoolTxForCreator(
+            env,
+            { name: input.name, symbol: input.symbol, uri: input.uri },
+            {
+              tokenSupply: input.tokenSupply,
+              tokenDecimals: input.tokenDecimals,
+              startingMarketCap: input.startingMarketCap,
+              graduationMarketCap: input.graduationMarketCap,
+              fees: input.fees,
+              creatorLockedLiquidityPercentage: input.creatorLockedLiquidityPercentage,
+            },
+            new PublicKey(creator),
+          ),
+        );
+        return {
+          tx: { tx: b64(built.tx), label: `Create ${input.symbol} token + market`, lastValidBlockHeight: built.lastValidBlockHeight },
+          pool: {
+            baseMint: built.baseMint.toBase58(),
+            dbcConfig: built.config.toBase58(),
+            dbcPool: built.pool.toBase58(),
+            poolOwners: [DBC_POOL_AUTHORITY.toBase58()],
+            dbcParams: {
+              ...built.dbcParams,
+              quoteMint: quoteMint.toBase58(),
+              transferHookProgram: allowlistProgram.toBase58(),
+              partner: fsAuthority.publicKey.toBase58(),
+              creator,
+            },
+          },
+        };
+      },
+
+      async finalizeCreatePool(pool) {
+        return { signatures: [await initHookAllowlist(env, new PublicKey(pool.baseMint))] };
+      },
+
+      async buildTransferBatchTx(from, rows) {
+        const { tx, lastValidBlockHeight } = await buildTransferTx(connection, quoteMint, new PublicKey(from), rows);
+        return { tx: b64(tx), label: `Pay ${rows.length} holder${rows.length === 1 ? "" : "s"}`, lastValidBlockHeight };
+      },
+
+      async submitSigned(unsigned: UnsignedTx, signedTx: string, signer: string) {
+        const expected = Transaction.from(Buffer.from(unsigned.tx, "base64"));
+        let signed: Transaction;
+        try {
+          signed = Transaction.from(Buffer.from(signedTx, "base64"));
+        } catch {
+          throw new Error("signed transaction is not a valid legacy transaction");
+        }
+        if (!signed.serializeMessage().equals(expected.serializeMessage())) {
+          throw new Error("signed transaction does not match the prepared one");
+        }
+        const own = signed.signatures.find((s) => s.publicKey.toBase58() === signer);
+        if (!own?.signature) throw new Error(`transaction is not signed by ${signer}`);
+        if (!signed.verifySignatures(true)) throw new Error("transaction signatures are missing or invalid");
+        const sig = await sendSignedTx(connection, signed.serialize(), signed.signature!, unsigned.lastValidBlockHeight, unsigned.label);
+        return { signature: sig };
       },
     },
   };

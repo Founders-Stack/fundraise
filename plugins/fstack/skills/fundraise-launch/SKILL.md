@@ -74,7 +74,8 @@ Add `projectedGraduation.note` in one line.
 `Agreement hash: <agreement.hash>`. Offer to print the full `agreement.text` if they want to read it.
 
 **Custody**: `custody` ("Demo custody (devnet)"): the server signs with devnet keys; nothing has real
-monetary value. First record date if launched now: `nextRecordDateIfLaunchedNow` (date only).
+monetary value. (If the server runs in wallet signing mode, creating returns a sign link instead and the
+founder signs with their own wallet; see Step 4.) First record date if launched now: `nextRecordDateIfLaunchedNow` (date only).
 
 ## Step 3 / 4: Confirm
 
@@ -99,6 +100,19 @@ Call `fundraise_create_issuance` with `{ previewId }`.
   instead of creating another.
 - `400 preview_not_found` → preview again (Step 2) and re-confirm.
 - `502 chain_error` → the market was not created; the preview can be retried. Ask before retrying.
+
+**If the response has `status: "AWAITING_SIGNATURE"`** (wallet signing mode), nothing is on-chain yet.
+Tell the founder, then end your turn:
+
+> Open this link in your own browser, connect your wallet, check the summary and sign:
+> `<signUrl>`
+> Your wallet creates the `<symbol>` token and market and pays the network fees. I never see your keys.
+> The link expires `<expiresAt>`. Tell me when you've signed.
+
+When they say they've signed (or ask for status), call `fundraise_get_sign_request` with
+`signRequestId`. `COMPLETED` → use its `result` as the success payload below. `PENDING` with an `error`
+→ show the error and ask them to open the link again. `EXPIRED` → offer a fresh preview + link. Never ask
+the founder for a private key or seed phrase, and never try to sign for them.
 
 On success print:
 

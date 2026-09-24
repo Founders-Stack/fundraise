@@ -19,12 +19,14 @@ import {
   type MonetizationConfig,
 } from "@fstack/core";
 import { prisma } from "@/lib/db";
-import { getChain } from "@/lib/chain";
+import { getChain, type CreatePoolInput, type WalletPool } from "@/lib/chain";
 import { HttpError, appUrl } from "./http";
+import { awaitingSignature, openSignRequest, signingMode, type SignPayload } from "./signing";
 import {
   attachMarket,
   deleteIssuance,
   insertPendingIssuance,
+  loadIssuance,
   onboardUrl,
   requireMarket,
   type IssuanceRecord,
@@ -319,19 +321,8 @@ export async function startIssuanceCreation(previewId: unknown) {
 /** Step 2 (slow, on-chain): mint + hook + DBC pool. On failure the row is removed and the preview released. */
 export async function completeIssuanceCreation(issuance: IssuanceRecord, previewId: string): Promise<IssuanceRecord> {
   const chain = await getChain();
-  const { terms } = issuance;
   try {
-    const res = await chain.market.createIssuancePool({
-      name: terms.tokenName,
-      symbol: terms.symbol,
-      uri: `${appUrl()}/api/issuances/${issuance.id}`,
-      tokenSupply: terms.tokenSupply,
-      tokenDecimals: terms.tokenDecimals,
-      startingMarketCap: issuance.startingMarketCap,
-      graduationMarketCap: issuance.graduationMarketCap,
-      fees: toDbcFeeParams(issuance.monetization),
-      creatorLockedLiquidityPercentage: 100,
-    });
+    const res = await chain.market.createIssuancePool(poolInput(issuance));
     return await attachMarket(issuance.id, {
       baseMint: res.baseMint,
       quoteMint: chain.payout.quoteMint(),
@@ -349,9 +340,34 @@ export async function completeIssuanceCreation(issuance: IssuanceRecord, preview
   }
 }
 
-export async function createIssuance(previewId: unknown) {
+function poolInput(issuance: IssuanceRecord): CreatePoolInput {
+  const { terms } = issuance;
+  return {
+    name: terms.tokenName,
+    symbol: terms.symbol,
+    uri: `${appUrl()}/api/issuances/${issuance.id}`,
+    tokenSupply: terms.tokenSupply,
+    tokenDecimals: terms.tokenDecimals,
+    startingMarketCap: issuance.startingMarketCap,
+    graduationMarketCap: issuance.graduationMarketCap,
+    fees: toDbcFeeParams(issuance.monetization),
+    creatorLockedLiquidityPercentage: 100,
+  };
+}
+
+/**
+ * POST /api/issuances. Custody mode (default) creates the market now with server keys; wallet mode
+ * (SPEC 0.4 P1) leaves the issuance PENDING and returns a signUrl for the founder's wallet.
+ */
+export async function createIssuance(previewId: unknown, opts: { signingMode?: unknown } = {}) {
+  const mode = signingMode(opts.signingMode);
   const pending = await startIssuanceCreation(previewId);
+  if (mode === "wallet") return requestIssuanceSignature(pending);
   const done = await completeIssuanceCreation(pending, previewId as string);
+  return liveIssuanceResult(done, COPY.demoCustody);
+}
+
+function liveIssuanceResult(done: IssuanceRecord, custody: string) {
   const market = requireMarket(done);
   return {
     issuanceId: done.id,
@@ -369,8 +385,79 @@ export async function createIssuance(previewId: unknown) {
     /** Share this with investors: it carries the invite code onboarding requires. */
     onboardUrl: onboardUrl(done, true),
     inviteCode: done.inviteCode,
-    custody: COPY.demoCustody,
+    custody,
   };
+}
+
+// ---------------------------------------------------------------- wallet signing (SPEC 0.4 P1)
+
+export const WALLET_CUSTODY_LABEL = "Founder wallet (signed via sign link)";
+
+/** Wallet mode: the pending issuance waits for the founder's wallet to sign the create-pool tx. */
+async function requestIssuanceSignature(pending: IssuanceRecord) {
+  const { terms } = pending;
+  const row = await openSignRequest("ISSUANCE_CREATE", pending.id, {
+    title: `Launch ${terms.symbol}`,
+    action: `Create the ${terms.symbol} Token-2022 mint and its Meteora DBC market, with your wallet as the pool creator.`,
+    lines: [
+      { label: "Issuer", value: terms.issuerName },
+      { label: "Token", value: `${terms.tokenName} (${terms.symbol})` },
+      { label: "Supply", value: `${tokenDisplay(terms.tokenSupply, 0)} tokens` },
+      {
+        label: "Rights pool",
+        value: `${pctDisplay(terms.poolPercentageBps)} of ${terms.distributionFrequency.toLowerCase()} Distributable Cash Flow`,
+      },
+      { label: "Starting token market cap", value: usdDisplay(pending.startingMarketCap) },
+      { label: "Graduation token market cap", value: usdDisplay(pending.graduationMarketCap) },
+      { label: "Agreement hash", value: pending.agreement.hash },
+    ],
+    warning: "Your wallet pays the network fees and rent for the new accounts (a few hundredths of a SOL).",
+    doneUrl: `${appUrl()}/market/${pending.id}`,
+  });
+  return awaitingSignature(row, { issuanceId: pending.id, symbol: terms.symbol });
+}
+
+/** Builds the create-pool tx for the founder's wallet. */
+export async function buildIssuanceSignTxs(issuanceId: string, wallet: string): Promise<SignPayload> {
+  const rec = await loadIssuance(issuanceId);
+  if (rec.market) throw new HttpError(409, "already_live", "this issuance already has a market");
+  const chain = await getChain();
+  const { tx, pool } = await chain.wallet.buildCreatePoolTx(poolInput(rec), wallet);
+  return { txs: [tx], data: { pool } };
+}
+
+/** After the founder's create tx confirmed: server allowlist setup, then attach the market. */
+export async function applyIssuanceSigned(
+  issuanceId: string,
+  wallet: string,
+  payload: SignPayload,
+  signedTxs: string[],
+  onSignature: (sig: string) => Promise<void>,
+) {
+  const chain = await getChain();
+  const pool = payload.data.pool as WalletPool;
+  const rec = await loadIssuance(issuanceId);
+  if (rec.market) throw new HttpError(409, "already_live", "this issuance already has a market");
+  let signature: string;
+  try {
+    ({ signature } = await chain.wallet.submitSigned(payload.txs[0], signedTxs[0], wallet));
+  } catch (e) {
+    throw new HttpError(502, "chain_error", `Creating the market failed; reload the sign page to try again: ${(e as Error).message}`);
+  }
+  await onSignature(signature);
+  const signatures = [signature];
+  const followUp = await chain.wallet.finalizeCreatePool(pool);
+  const done = await attachMarket(issuanceId, {
+    baseMint: pool.baseMint,
+    quoteMint: chain.payout.quoteMint(),
+    dbcPool: pool.dbcPool,
+    dbcConfig: pool.dbcConfig,
+    poolOwners: pool.poolOwners,
+    signatures: [...signatures, ...followUp.signatures],
+    dbcParams: { ...pool.dbcParams, creator: wallet, signingMode: "wallet" },
+    chainMode: chain.mode,
+  });
+  return liveIssuanceResult(done, WALLET_CUSTODY_LABEL);
 }
 
 // ---------------------------------------------------------------- views

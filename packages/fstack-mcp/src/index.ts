@@ -7,11 +7,13 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { FS_API_URL } from "./client.js";
 import { registerIssuanceTools } from "./tools/issuance.js";
 import { registerDistributionTools } from "./tools/distribution.js";
+import { registerSigningTools } from "./tools/signing.js";
 
 const server = new McpServer({ name: "fstack", version: "0.1.0" });
 
 registerIssuanceTools(server);
 registerDistributionTools(server);
+registerSigningTools(server);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

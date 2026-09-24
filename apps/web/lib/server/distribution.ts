@@ -32,7 +32,8 @@ import {
   reportedPeriodView,
   type DistributionWithAll,
 } from "./distribution-views";
-import { HttpError } from "./http";
+import { HttpError, appUrl } from "./http";
+import { awaitingSignature, openSignRequest, signingMode, type SignPayload } from "./signing";
 import { loadIssuance, toIssuanceRecord } from "./issuance-record";
 
 const MAX_TRANSFERS_PER_TX = 10;
@@ -218,7 +219,8 @@ function assertSnapshotAllowed(
 // ---------------------------------------------------------------- execute
 
 export async function executeDistribution(id: string, input: unknown) {
-  const body = (input ?? {}) as { confirmTotal?: unknown };
+  const body = (input ?? {}) as { confirmTotal?: unknown; signingMode?: unknown };
+  const mode = signingMode(body.signingMode);
   if (body.confirmTotal === undefined || body.confirmTotal === null || body.confirmTotal === "") {
     throw new HttpError(400, "confirm_total_required", "confirmTotal is required: the founder must type the exact total (USDC) shown in the snapshot preview");
   }
@@ -232,6 +234,7 @@ export async function executeDistribution(id: string, input: unknown) {
   const d = await loadOr404(id);
   assertExecutable(d, typed);
   if (d.status === "EXECUTED") return { ...(await distributionDetail(d, { includeBalance: false })), alreadyExecuted: true };
+  if (mode === "wallet") return requestDistributionSignature(d, typed);
 
   // Claim the row. `totalAllocated: typed` makes the claim fail if a re-snapshot changed the total
   // after the founder confirmed it.
@@ -335,6 +338,12 @@ async function payClaimed(id: string, lease: Lease) {
     lease.until = next;
   }
 
+  return markExecuted(d, newSignatures, chain.mode);
+}
+
+/** Every payout is recorded: mark EXECUTED and move the issuance to its next record date. */
+async function markExecuted(d: DistributionWithAll, newSignatures: string[], chainMode: "fake" | "devnet") {
+  const id = d.id;
   const executedAt = new Date();
   const frequency = d.issuance.terms.distributionFrequency;
   // The record date of the period after the one just paid (labels from before canonical labels fall back to the current period).
@@ -351,8 +360,122 @@ async function payClaimed(id: string, lease: Lease) {
     newSignatures,
     nextRecordDate,
     note:
-      chain.mode === "fake"
+      chainMode === "fake"
         ? "CHAIN_MODE=fake: signatures are simulated, nothing moved on devnet."
         : "Holders can see this distribution on the market page.",
   };
+}
+
+// ---------------------------------------------------------------- wallet signing (SPEC 0.4 P1)
+
+/** Holder payouts per wallet-signed tx (each also creates missing recipient ATAs, so fewer than custody's 10). */
+const MAX_TRANSFERS_PER_WALLET_TX = 5;
+
+/** Wallet mode: the confirmed total is locked into a sign request; the founder's wallet pays. */
+async function requestDistributionSignature(d: DistributionWithAll, confirmed: bigint) {
+  const unpaid = d.allocations.filter((a) => a.payout > 0n && !a.txSignature);
+  const remaining = unpaid.reduce((s, a) => s + a.payout, 0n);
+  const txCount = Math.ceil(unpaid.length / MAX_TRANSFERS_PER_WALLET_TX);
+  const symbol = d.issuance.terms.symbol;
+  const row = await openSignRequest("DISTRIBUTION_EXECUTE", d.id, {
+    title: `Pay the ${symbol} ${d.periodLabel} distribution`,
+    action: `Send USDC from your wallet to ${unpaid.length} holder${unpaid.length === 1 ? "" : "s"} of ${symbol}, as in the snapshot you confirmed.`,
+    lines: [
+      { label: "Issuer", value: d.issuance.terms.issuerName },
+      { label: "Period", value: d.periodLabel },
+      { label: "Confirmed total", value: usdc(confirmed).display },
+      { label: "Still to pay", value: usdc(remaining).display },
+      { label: "Holders", value: String(unpaid.length) },
+      { label: "Transactions to sign", value: String(txCount) },
+    ],
+    warning: "Your wallet must hold the USDC total plus a little SOL for fees and new token accounts.",
+    doneUrl: `${appUrl()}/distributions/${d.id}`,
+    meta: { confirmTotal: confirmed.toString() },
+  });
+  return awaitingSignature(row, {
+    distributionId: d.id,
+    periodLabel: d.periodLabel,
+    confirmTotal: usdc(confirmed),
+    remaining: usdc(remaining),
+    holders: unpaid.length,
+  });
+}
+
+function confirmedTotalOf(summaryMeta: Record<string, string> | undefined): bigint {
+  const raw = summaryMeta?.confirmTotal;
+  if (!raw) throw new HttpError(500, "invalid_sign_request", "sign request has no confirmed total");
+  return BigInt(raw);
+}
+
+/** Unpaid payouts → one transfer tx per ≤ 5 holders, from the founder's wallet. */
+export async function buildDistributionSignTxs(id: string, wallet: string, meta: Record<string, string> | undefined): Promise<SignPayload> {
+  const d = await loadOr404(id);
+  assertExecutable(d, confirmedTotalOf(meta));
+  if (d.status === "EXECUTED") throw new HttpError(409, "already_executed", "this distribution was already paid");
+  const chain = await getChain();
+  const unpaid = d.allocations
+    .filter((a) => a.payout > 0n && !a.txSignature)
+    .sort((a, b) => (a.payout === b.payout ? (a.wallet < b.wallet ? -1 : 1) : a.payout > b.payout ? -1 : 1));
+  const batches = batchTransfers(unpaid, MAX_TRANSFERS_PER_WALLET_TX);
+  const txs = [];
+  for (const batch of batches) txs.push(await chain.wallet.buildTransferBatchTx(wallet, batch.map((a) => ({ wallet: a.wallet, amount: a.payout }))));
+  return { txs, data: { batches: batches.map((b) => b.map((a) => a.id)) } };
+}
+
+/**
+ * Broadcasts the founder-signed payout txs one by one under the execution lease, recording each
+ * batch as it confirms (a retry via a fresh build pays only unpaid rows), then marks EXECUTED.
+ */
+export async function applyDistributionSigned(
+  id: string,
+  wallet: string,
+  meta: Record<string, string> | undefined,
+  payload: SignPayload,
+  signedTxs: string[],
+  onSignature: (sig: string) => Promise<void>,
+) {
+  const confirmed = confirmedTotalOf(meta);
+  const lease: Lease = { until: new Date(Date.now() + EXECUTION_LEASE_MS) };
+  const claimed = await prisma.distribution.updateMany({
+    where: { id, status: "SNAPSHOTTED", totalAllocated: confirmed, ...leaseFree(new Date()) },
+    data: { executingUntil: lease.until },
+  });
+  if (claimed.count === 0) {
+    const current = await loadOr404(id);
+    assertExecutable(current, confirmed);
+    if (current.status === "EXECUTED") throw new HttpError(409, "already_executed", "this distribution was already paid");
+    throw new HttpError(409, "execution_in_progress", "execution is already running for this distribution");
+  }
+  try {
+    const chain = await getChain();
+    const batches = payload.data.batches as string[][];
+    const newSignatures: string[] = [];
+    for (let i = 0; i < payload.txs.length; i++) {
+      let signature: string;
+      try {
+        ({ signature } = await chain.wallet.submitSigned(payload.txs[i], signedTxs[i], wallet));
+      } catch (e) {
+        throw new HttpError(
+          502,
+          "partial_execution",
+          `payout tx ${i + 1}/${payload.txs.length} failed: ${e instanceof Error ? e.message : String(e)}. ` +
+            "Completed payouts are recorded; reload the sign page to sign the rest.",
+          { batchesCompleted: i, batchesTotal: payload.txs.length, newSignatures },
+        );
+      }
+      newSignatures.push(signature);
+      await onSignature(signature);
+      await prisma.allocation.updateMany({ where: { id: { in: batches[i] }, distributionId: id, txSignature: null }, data: { txSignature: signature } });
+      const next = new Date(Date.now() + EXECUTION_LEASE_MS);
+      await prisma.distribution.updateMany({ where: { id, executingUntil: lease.until }, data: { executingUntil: next } });
+      lease.until = next;
+    }
+    const d = await loadOr404(id);
+    if (d.allocations.some((a) => a.payout > 0n && !a.txSignature)) {
+      throw new HttpError(409, "payouts_remaining", "some payouts are still unpaid; reload the sign page to sign the rest");
+    }
+    return await markExecuted(d, newSignatures, chain.mode);
+  } finally {
+    await prisma.distribution.updateMany({ where: { id, executingUntil: lease.until }, data: { executingUntil: null } });
+  }
 }
