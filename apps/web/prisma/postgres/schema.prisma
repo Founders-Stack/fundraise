@@ -36,6 +36,8 @@ model Issuance {
   issuerJurisdiction    String?
   dcfDefinition         String?
   recordDateRule        String?
+  // closed pilot: onboarding requires this code (SPEC section 6); NULL = not required (older rows)
+  inviteCode            String?
 
   // derived, stored
   startingMarketCap     BigInt   // USDC base units
@@ -90,6 +92,13 @@ model Distribution {
   unallocated    BigInt?   // USDC base units
   executedAt     DateTime?
   executingUntil DateTime? // execution lease: set atomically by execute, cleared when it finishes
+  // Payout mode (SPEC 7): DIRECT = issuer pays every holder; ESCROW = issuer funds the claim escrow once,
+  // holders claim with a Merkle proof. Fixed once the escrow is funded.
+  payoutMode     String    @default("DIRECT") // DIRECT | ESCROW
+  merkleRoot     String?   // hex sha256 root over (distributionId, wallet, payout) leaves; set when escrow is funded
+  escrowAddress  String?   // escrow wallet the issuer funded
+  escrowFundSignature String? // the issuer -> escrow transfer
+  escrowFundedAt DateTime?
   createdAt      DateTime  @default(now())
 
   allocations Allocation[]
@@ -106,7 +115,9 @@ model Allocation {
   participant    Participant? @relation(fields: [participantId], references: [id])
   tokens         BigInt       // token base units
   payout         BigInt       // USDC base units
-  txSignature    String?
+  txSignature    String?      // DIRECT: the payout batch; ESCROW: the claim release
+  claimingUntil  DateTime?    // ESCROW claim lock: set atomically by a claim, cleared when it finishes
+  claimedAt      DateTime?
 
   @@unique([distributionId, wallet])
 }
@@ -119,4 +130,27 @@ model IssuancePreview {
   usedAt     DateTime?
   issuanceId String?
   createdAt  DateTime  @default(now())
+}
+
+// Wallet-signing link (SPEC 0.4 P1, /sign/[requestId]): a mutating action the founder signs with
+// their own wallet instead of server custody. Created by issuance create / distribution execute
+// when the signing mode is "wallet"; the page builds the tx(s) for the connected wallet, the
+// wallet signs, and the API verifies + broadcasts them and applies the result.
+model SignRequest {
+  id          String    @id @default(cuid())
+  purpose     String    // ISSUANCE_CREATE | DISTRIBUTION_EXECUTE
+  subjectId   String    // Issuance.id or Distribution.id
+  status      String    @default("PENDING") // PENDING | COMPLETED | FAILED | EXPIRED
+  summaryJson String    // human-readable summary shown on the sign page (JSON)
+  signer      String?   // wallet that built the txs; only it can submit
+  payloadJson String?   // prepared unsigned txs + purpose data (JSON), replaced on every build
+  signatures  String    @default("[]") // JSON string[] of confirmed signatures
+  resultJson  String?   // outcome once COMPLETED (JSON)
+  error       String?
+  expiresAt   DateTime
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([purpose, subjectId])
 }

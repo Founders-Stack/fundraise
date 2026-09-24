@@ -22,6 +22,7 @@ CREATE TABLE "Issuance" (
     "issuerJurisdiction" TEXT,
     "dcfDefinition" TEXT,
     "recordDateRule" TEXT,
+    "inviteCode" TEXT,
     "startingMarketCap" BIGINT NOT NULL,
     "graduationMarketCap" BIGINT NOT NULL,
     "quoteMint" TEXT,
@@ -69,6 +70,11 @@ CREATE TABLE "Distribution" (
     "unallocated" BIGINT,
     "executedAt" TIMESTAMP(3),
     "executingUntil" TIMESTAMP(3),
+    "payoutMode" TEXT NOT NULL DEFAULT 'DIRECT',
+    "merkleRoot" TEXT,
+    "escrowAddress" TEXT,
+    "escrowFundSignature" TEXT,
+    "escrowFundedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Distribution_pkey" PRIMARY KEY ("id")
@@ -83,6 +89,8 @@ CREATE TABLE "Allocation" (
     "tokens" BIGINT NOT NULL,
     "payout" BIGINT NOT NULL,
     "txSignature" TEXT,
+    "claimingUntil" TIMESTAMP(3),
+    "claimedAt" TIMESTAMP(3),
 
     CONSTRAINT "Allocation_pkey" PRIMARY KEY ("id")
 );
@@ -99,6 +107,26 @@ CREATE TABLE "IssuancePreview" (
     CONSTRAINT "IssuancePreview_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "SignRequest" (
+    "id" TEXT NOT NULL,
+    "purpose" TEXT NOT NULL,
+    "subjectId" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "summaryJson" TEXT NOT NULL,
+    "signer" TEXT,
+    "payloadJson" TEXT,
+    "signatures" TEXT NOT NULL DEFAULT '[]',
+    "resultJson" TEXT,
+    "error" TEXT,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "completedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "SignRequest_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Participant_issuanceId_wallet_key" ON "Participant"("issuanceId", "wallet");
 
@@ -107,6 +135,9 @@ CREATE UNIQUE INDEX "Distribution_issuanceId_periodLabel_key" ON "Distribution"(
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Allocation_distributionId_wallet_key" ON "Allocation"("distributionId", "wallet");
+
+-- CreateIndex
+CREATE INDEX "SignRequest_purpose_subjectId_idx" ON "SignRequest"("purpose", "subjectId");
 
 -- AddForeignKey
 ALTER TABLE "Participant" ADD CONSTRAINT "Participant_issuanceId_fkey" FOREIGN KEY ("issuanceId") REFERENCES "Issuance"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -119,3 +150,4 @@ ALTER TABLE "Allocation" ADD CONSTRAINT "Allocation_distributionId_fkey" FOREIGN
 
 -- AddForeignKey
 ALTER TABLE "Allocation" ADD CONSTRAINT "Allocation_participantId_fkey" FOREIGN KEY ("participantId") REFERENCES "Participant"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
