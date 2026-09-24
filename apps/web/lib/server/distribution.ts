@@ -158,7 +158,7 @@ export async function snapshotDistribution(id: string) {
   const d = await loadOr404(id);
   assertSnapshotAllowed(d);
 
-  const classified = await getClassifiedHolders(d.issuance);
+  const classified = await getClassifiedHolders(d.issuance, d.participants);
   const result = allocate(
     { slot: classified.slot, tokenSupply: classified.tokenSupply, holders: classified.holders },
     d.rightsPool,

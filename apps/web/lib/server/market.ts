@@ -129,10 +129,8 @@ const KIND_LABEL = {
 export async function getHoldersView(id: string, isIssuer: boolean) {
   const issuance = await loadIssuance(id);
   requireMarket(issuance);
-  const [classified, participants] = await Promise.all([
-    getClassifiedHolders(issuance),
-    prisma.participant.findMany({ where: { issuanceId: id }, orderBy: { createdAt: "asc" } }),
-  ]);
+  const participants = await prisma.participant.findMany({ where: { issuanceId: id }, orderBy: { createdAt: "asc" } });
+  const classified = await getClassifiedHolders(issuance, participants);
   const byId = new Map(participants.map((p) => [p.id, p]));
   const supply = classified.tokenSupply;
   const holders = [...classified.holders]

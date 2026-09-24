@@ -1,5 +1,6 @@
 // Distribution engine (SPEC section 2 R1/R5/R7, section 7).
 // Pure functions. All money is bigint base units: USDC 6 dp, token 6 dp.
+export * from "./holders";
 
 export const USDC_DECIMALS = 6;
 export const DEFAULT_TOKEN_DECIMALS = 6;

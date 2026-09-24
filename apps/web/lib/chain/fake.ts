@@ -148,17 +148,12 @@ export function createFakePorts(): ChainPorts {
         save(s);
         return { signature: sig() };
       },
-      async getHolders(mint, poolOwners) {
+      async getBalances(mint) {
         const s = load();
-        const holders = Object.entries(s.balances[mint] ?? {})
+        const balances = Object.entries(s.balances[mint] ?? {})
           .filter(([, v]) => BigInt(v) > 0n)
-          .map(([owner, v]) => ({
-            owner,
-            tokenAccount: `ata:${owner.slice(0, 8)}`,
-            amount: BigInt(v),
-            kind: poolOwners.includes(owner) ? ("POOL" as const) : ("UNREGISTERED" as const),
-          }));
-        return { slot: s.slot, holders };
+          .map(([owner, v]) => ({ owner, tokenAccount: `ata:${owner.slice(0, 8)}`, amount: BigInt(v) }));
+        return { slot: s.slot, balances };
       },
     },
     payout: {
