@@ -50,7 +50,9 @@ export function OnboardingGate(props: OnboardingGateProps) {
   const [showFull, setShowFull] = useState(false);
   const [busy, setBusy] = useState<null | "sign" | "register">(null);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
-  const [enabled, setEnabled] = useState<{ allowlistTx: string | null } | null>(null);
+  const [enabledFor, setEnabled] = useState<{ wallet: string; allowlistTx: string | null } | null>(null);
+  // Only counts for the wallet that just signed: switching wallets must not carry "Trading enabled" over.
+  const enabled = enabledFor && enabledFor.wallet === wallet ? enabledFor : null;
 
   const registered = Boolean(enabled) || Boolean(status?.registered);
   const step = !wallet ? 0 : registered ? 2 : 1;
@@ -84,7 +86,7 @@ export function OnboardingGate(props: OnboardingGateProps) {
         method: "POST",
         body: { wallet, eligible: true, agreementHash: agreement.hash, signature, invite: invite.trim() || undefined },
       });
-      setEnabled({ allowlistTx: res.participant.allowlistTx });
+      setEnabled({ wallet, allowlistTx: res.participant.allowlistTx });
       announceMarketChange();
       await refresh();
     } catch (e) {
