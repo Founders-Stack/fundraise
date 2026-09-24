@@ -5,6 +5,7 @@ import { listIssuances } from "@/lib/server/issuance-record";
 import { getMarketView } from "@/lib/server/market";
 import { CodeBlock } from "@/components/code-block";
 import { bps, usd, usdCompact } from "@/components/format";
+import { TokenGlyph } from "@/components/fs";
 
 export const dynamic = "force-dynamic";
 
@@ -50,11 +51,12 @@ export default async function Home() {
   return (
     <div className="space-y-16 sm:space-y-20">
       {/* ------------------------------------------------------------ hero */}
-      <section className="grid items-center gap-10 lg:grid-cols-[1.1fr_1fr]">
+      <section className="fs-backdrop -mx-4 -mt-8 grid items-center gap-10 px-4 pt-10 pb-6 sm:-mx-6 sm:-mt-10 sm:px-6 sm:pt-14 lg:grid-cols-[1.1fr_1fr]">
         <div className="space-y-6">
           <p className="eyebrow">Cash Flow Rights · Solana devnet</p>
-          <h1 className="text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
-            Raise against your cash flow, straight from your coding agent.
+          <h1 className="text-[clamp(2.5rem,5.4vw,4rem)] leading-[0.92] font-semibold tracking-[-0.055em] text-balance">
+            Raise against your cash flow,{" "}
+            <em className="serif-accent text-[1.06em] tracking-[-0.03em]">from your coding agent</em>
           </h1>
           <p className="max-w-xl text-base text-muted-foreground text-pretty sm:text-lg">
             Founders launch a market for a share of future Distributable Cash Flow from Claude Code or Codex.
@@ -63,13 +65,13 @@ export default async function Home() {
           <div className="flex flex-wrap gap-3">
             <Link
               href="#markets"
-              className="inline-flex h-10 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/85"
+              className="inline-flex h-10 items-center gap-2 rounded-[2px] bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-[color-mix(in_srgb,var(--primary),#000_12%)]"
             >
               Browse markets <ArrowRight className="size-4" />
             </Link>
             <Link
               href="#agent"
-              className="inline-flex h-10 items-center gap-2 rounded-lg border bg-card px-4 text-sm font-medium hover:bg-muted"
+              className="inline-flex h-10 items-center gap-2 rounded-[2px] border border-input bg-muted px-4 text-sm font-semibold hover:bg-secondary"
             >
               <Bot className="size-4" /> Operate from your agent
             </Link>
@@ -141,7 +143,7 @@ export default async function Home() {
             <div className="hidden overflow-hidden rounded-xl border bg-card md:block">
               <table className="w-full text-sm">
                 <thead className="border-b bg-surface text-left">
-                  <tr className="[&>th]:px-4 [&>th]:py-2.5 [&>th]:text-xs [&>th]:font-medium [&>th]:text-muted-foreground">
+                  <tr className="[&>th]:px-4 [&>th]:py-2.5 [&>th]:label-mono [&>th]:font-normal">
                     <th>Issuance</th>
                     <th>Rights</th>
                     <th className="text-right">Price</th>
@@ -253,11 +255,7 @@ export default async function Home() {
 }
 
 function TokenMark({ symbol }: { symbol: string }) {
-  return (
-    <span className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-brand-soft text-[11px] font-semibold tracking-tight text-brand">
-      {symbol.slice(0, 4)}
-    </span>
-  );
+  return <TokenGlyph symbol={symbol} />;
 }
 
 function YieldCell({ market }: { market: Awaited<ReturnType<typeof getMarketView>> | null }) {
