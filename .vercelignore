@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+.next
+**/.next
+programs/*/target
+keys
+keys-*
+.env
+.env.*
+!.env.example
+.claude
+demo
+*.db
+*.db-journal
+.fake-chain.json
