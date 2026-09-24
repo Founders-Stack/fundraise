@@ -182,6 +182,36 @@ export async function sendTx(
   throw new TxError(`${label}: not landed`, false);
 }
 
+/**
+ * Broadcasts a transaction a wallet already signed (SPEC 0.4 P1) and waits until it confirms,
+ * fails, or its blockhash expires. Same double-send-safe polling as sendTx; never re-signs.
+ */
+export async function sendSignedTx(
+  connection: Connection,
+  raw: Buffer | Uint8Array,
+  signature: Uint8Array,
+  lastValidBlockHeight: number,
+  label = "tx",
+): Promise<TransactionSignature> {
+  const sig = encodeSig(signature);
+  try {
+    await connection.sendRawTransaction(raw, { skipPreflight: false, preflightCommitment: COMMITMENT, maxRetries: 5 });
+  } catch (e) {
+    const err = e as Error & { logs?: string[] };
+    const msg = String(err?.message ?? e);
+    if (e instanceof SendTransactionError || /failed to send transaction|simulation failed/i.test(msg)) {
+      throw new TxError(`${label} failed (preflight): ${msg}`, false, sig, err.logs ?? []);
+    }
+  }
+  const outcome = await pollUntilFinal(connection, sig, raw, lastValidBlockHeight);
+  if (outcome.status === "confirmed") return sig;
+  if (outcome.status === "failed") {
+    const logs = await fetchLogs(connection, sig);
+    throw new TxError(`${label} failed: ${JSON.stringify(outcome.err)} sig=${sig}\n${logs.join("\n")}`, true, sig, logs);
+  }
+  throw new TxError(`${label}: not landed (blockhash expired) sig=${sig}. Open the sign link again to get a fresh transaction.`, false, sig);
+}
+
 async function pollUntilFinal(
   connection: Connection,
   sig: string,

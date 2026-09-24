@@ -33,6 +33,13 @@ Snapshot → preview → founder types the total → execute → signatures. Thi
    yourself. If what they type doesn't match, show the preview total again and ask again.
 5. **Execute.** Call `fundraise_execute_distribution` with `distributionId` and `confirmTotal` = the founder's
    typed string, verbatim.
+   - **If the response has `status: "AWAITING_SIGNATURE"`** (wallet signing mode), no USDC has moved. Say:
+     "Open this link in your own browser, connect the wallet that holds the USDC, check the summary and sign
+     the payouts: `<signUrl>`. It needs `<remaining.display>` in USDC plus a little SOL for fees. Tell me when
+     you've signed." Then end your turn. When they come back, call `fundraise_get_sign_request` with
+     `signRequestId`: `COMPLETED` → report its `result` as in step 6; `PENDING` with `error` → show it (paid
+     batches stay recorded) and ask them to open the link again; `EXPIRED` → call execute again with the
+     same confirmTotal for a new link. Never ask for a private key or seed phrase.
 6. **Report the result**: status EXECUTED, each signature from `signatures` with its `explorerUrl` and the
    wallets it paid, the new `nextRecordDate`. If `chainMode` is `fake` (or `fake: true` on a signature), say the
    signatures are simulated (fake chain mode) and nothing moved on devnet. Point investors to the market page.

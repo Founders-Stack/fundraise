@@ -4,6 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { api } from "../client.js";
 import { forward } from "./forward.js";
+import { signingMode } from "./signing.js";
 
 const issuanceId = z.string().min(1).describe("Issuance id (from fundraise_list_issuances or fundraise_create_issuance)");
 
@@ -49,13 +50,16 @@ export function registerIssuanceTools(server: McpServer) {
     {
       title: "Create the issuance (on-chain)",
       description:
-        "CREATES ON-CHAIN STATE (POST /api/issuances): Token-2022 mint with the allowlist transfer hook + Meteora DBC pool, signed by the server (demo custody, devnet). Requires a previewId from fundraise_preview_issuance; each previewId works once. Only call after showing the preview and receiving the founder's explicit confirmation. Returns issuanceId, mint, pool, signatures, marketUrl and onboardUrl.",
+        "CREATES ON-CHAIN STATE (POST /api/issuances): Token-2022 mint with the allowlist transfer hook + Meteora DBC pool. Requires a previewId from fundraise_preview_issuance; each previewId works once. Only call after showing the preview and receiving the founder's explicit confirmation. " +
+        "Custody mode: signed by the server (closed pilot) and returns issuanceId, mint, pool, signatures, marketUrl and onboardUrl. " +
+        "Wallet mode: returns status AWAITING_SIGNATURE with a signUrl; nothing is on-chain until the founder opens signUrl in their own browser and signs with their wallet. Then poll fundraise_get_sign_request; its `result` has the market details.",
       inputSchema: {
         previewId: z.string().min(1).describe("previewId returned by fundraise_preview_issuance"),
+        signingMode,
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ previewId }) => forward(() => api("POST", "/issuances", { previewId })),
+    async ({ previewId, signingMode }) => forward(() => api("POST", "/issuances", { previewId, signingMode })),
   );
 
   server.registerTool(

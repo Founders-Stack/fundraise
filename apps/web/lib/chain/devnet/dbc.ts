@@ -246,6 +246,71 @@ export async function createHookPool(
   };
 }
 
+/**
+ * Wallet-signing variant of createHookPool step 1 (SPEC 0.4 P1): the founder's wallet `creator`
+ * is fee payer and pool creator. The ephemeral config + mint keypairs (and the Founder Stack
+ * partner key, if the program requires it) sign here; the returned tx only lacks the founder's
+ * signature. Step 2 (allowlist init) is `initHookAllowlist`, run by the server after it lands.
+ */
+export async function buildHookPoolTxForCreator(
+  env: DevnetEnv,
+  meta: { name: string; symbol: string; uri: string },
+  curve: CurveInput,
+  creator: PublicKey,
+) {
+  const { connection, fsAuthority, quoteMint, allowlistProgram } = env;
+  const client = new DynamicBondingCurveClient(connection, COMMITMENT);
+  const configKp = Keypair.generate();
+  const baseMintKp = Keypair.generate();
+  const { params, config } = buildCurveParams(curve);
+  const built = await client.partner.createConfigAndPoolWithTransferHook({
+    ...config,
+    config: configKp.publicKey,
+    feeClaimer: fsAuthority.publicKey,
+    leftoverReceiver: fsAuthority.publicKey,
+    quoteMint,
+    transferHookProgram: allowlistProgram,
+    payer: creator,
+    preCreatePoolParam: {
+      name: meta.name.slice(0, 32),
+      symbol: meta.symbol.slice(0, 10),
+      uri: meta.uri.slice(0, 200),
+      poolCreator: creator,
+      baseMint: baseMintKp.publicKey,
+    },
+  });
+  const tx = new Transaction().add(...computeBudgetIxs(600_000), ...built.instructions);
+  tx.feePayer = creator;
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(COMMITMENT);
+  tx.recentBlockhash = blockhash;
+  const message = tx.compileMessage();
+  const required = new Set(
+    message.accountKeys.slice(0, message.header.numRequiredSignatures).map((k) => k.toBase58()),
+  );
+  const serverSigners = [configKp, baseMintKp, fsAuthority].filter((k) => required.has(k.publicKey.toBase58()));
+  if (serverSigners.length) tx.partialSign(...serverSigners);
+  return {
+    tx,
+    lastValidBlockHeight,
+    baseMint: baseMintKp.publicKey,
+    config: configKp.publicKey,
+    pool: deriveDbcPoolAddress(quoteMint, baseMintKp.publicKey, configKp.publicKey),
+    dbcParams: describeConfig(params, config),
+  };
+}
+
+/** createHookPool step 2: fs_allowlist.initialize + allow the DBC pool authority (Founder Stack key). */
+export async function initHookAllowlist(env: DevnetEnv, baseMint: PublicKey): Promise<string> {
+  const { connection, fsAuthority, allowlistProgram } = env;
+  const t2 = new Transaction().add(
+    ...computeBudgetIxs(200_000),
+    initializeIx({ program: allowlistProgram, payer: fsAuthority.publicKey, authority: fsAuthority.publicKey, mint: baseMint, admin: fsAuthority.publicKey }),
+    addAllowIx({ program: allowlistProgram, admin: fsAuthority.publicKey, mint: baseMint, wallet: DBC_POOL_AUTHORITY }),
+  );
+  t2.feePayer = fsAuthority.publicKey;
+  return sendTx(connection, t2, [fsAuthority], "fs_allowlist.initialize+add_allow(pool authority)");
+}
+
 /** PoolService whose transfer-hook account resolution uses our explicit fs_allowlist accounts. */
 class HookPoolService extends PoolService {
   hook: AccountMeta[] = [];

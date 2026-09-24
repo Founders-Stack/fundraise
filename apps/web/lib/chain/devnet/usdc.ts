@@ -59,6 +59,34 @@ export async function tokenBalance(connection: Connection, account: PublicKey): 
 }
 
 /**
+ * Unsigned tx (fee payer = `from`, the founder's wallet) that creates missing recipient ATAs
+ * idempotently and transfers USDC to each row. Callers keep batches ≤ 5 so it fits one tx.
+ */
+export async function buildTransferTx(
+  connection: Connection,
+  mint: PublicKey,
+  from: PublicKey,
+  rows: { wallet: string; amount: bigint }[],
+): Promise<{ tx: Transaction; lastValidBlockHeight: number }> {
+  if (rows.length === 0) throw new Error("buildTransferTx: no rows");
+  if (rows.length > 5) throw new Error("buildTransferTx: max 5 rows per wallet-signed transaction");
+  const src = usdcAta(mint, from);
+  const tx = new Transaction().add(...computeBudgetIxs(200_000, 10_000));
+  for (const r of rows) {
+    const owner = new PublicKey(r.wallet);
+    const ata = usdcAta(mint, owner);
+    tx.add(
+      createAssociatedTokenAccountIdempotentInstruction(from, ata, owner, mint, TOKEN_PROGRAM_ID),
+      createTransferCheckedInstruction(src, mint, ata, from, r.amount, USDC_DECIMALS, [], TOKEN_PROGRAM_ID),
+    );
+  }
+  tx.feePayer = from;
+  const { blockhash, lastValidBlockHeight } = await withRetry(() => connection.getLatestBlockhash("confirmed"));
+  tx.recentBlockhash = blockhash;
+  return { tx, lastValidBlockHeight };
+}
+
+/**
  * Sends ≤ 10 USDC transfers from `from` in ONE transaction and returns its signature.
  * Recipient ATAs that don't exist yet are created first (idempotent, separate tx, paid by `from`)
  * so the transfer tx stays under the size limit.

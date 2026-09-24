@@ -28,6 +28,15 @@ the server just **forwards your bearer token** and returns the API's JSON.
 | `fundraise_snapshot` | `POST /api/distributions/:id/snapshot` | DB (preview + `confirmTotal`) |
 | `fundraise_execute_distribution` | `POST /api/distributions/:id/execute` `{ confirmTotal }` | ✅ USDC |
 | `fundraise_get_distribution` | `GET /api/distributions/:id` | — |
+| `fundraise_get_sign_request` | `GET /api/sign/:id` | — |
+
+**Signing (SPEC 0.4).** `fundraise_create_issuance` and `fundraise_execute_distribution` take an optional
+`signingMode`: `"custody"` (the server signs; closed pilot) or `"wallet"`. Omitted, the server default applies
+(`FS_SIGNING_MODE`, else `custody`). In wallet mode nothing happens on-chain yet: the response is
+`{ status: "AWAITING_SIGNATURE", signUrl, signRequestId }`. The founder opens `signUrl` (`/sign/[requestId]`)
+in their own browser, connects their wallet, reviews the summary and signs; the API verifies the signed
+transactions match what it prepared, broadcasts them and applies the result. Poll
+`fundraise_get_sign_request` until `status` is `COMPLETED` (its `result` is what the custody call returns).
 
 Distribution amounts (`dcf`, `confirmTotal`) are USDC **decimal strings** (`"400000"`, `"4,000.00"`), never
 base units. `confirmTotal` must be the exact total the founder typed; the API rejects any mismatch, so an

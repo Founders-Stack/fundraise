@@ -121,3 +121,26 @@ model IssuancePreview {
   issuanceId String?
   createdAt  DateTime  @default(now())
 }
+
+// Wallet-signing link (SPEC 0.4 P1, /sign/[requestId]): a mutating action the founder signs with
+// their own wallet instead of server custody. Created by issuance create / distribution execute
+// when the signing mode is "wallet"; the page builds the tx(s) for the connected wallet, the
+// wallet signs, and the API verifies + broadcasts them and applies the result.
+model SignRequest {
+  id          String    @id @default(cuid())
+  purpose     String    // ISSUANCE_CREATE | DISTRIBUTION_EXECUTE
+  subjectId   String    // Issuance.id or Distribution.id
+  status      String    @default("PENDING") // PENDING | COMPLETED | FAILED | EXPIRED
+  summaryJson String    // human-readable summary shown on the sign page (JSON)
+  signer      String?   // wallet that built the txs; only it can submit
+  payloadJson String?   // prepared unsigned txs + purpose data (JSON), replaced on every build
+  signatures  String    @default("[]") // JSON string[] of confirmed signatures
+  resultJson  String?   // outcome once COMPLETED (JSON)
+  error       String?
+  expiresAt   DateTime
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([purpose, subjectId])
+}

@@ -4,6 +4,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { api } from "../client.js";
 import { forward } from "./forward.js";
+import { signingMode } from "./signing.js";
 
 const usdcAmount = z
   .string()
@@ -73,17 +74,20 @@ export function registerDistributionTools(server: McpServer) {
         "MOVES USDC ON-CHAIN from the issuer wallet to every holder in the snapshot (POST /api/distributions/:id/execute). " +
         "Requires `confirmTotal`: the exact total the FOUNDER typed in this conversation after seeing the fundraise_snapshot " +
         "preview. Never call this without the founder typing it; never fill it in yourself from the preview. The server " +
-        "rejects any mismatch. Retrying after a partial failure pays only unpaid rows; calling it again after success is a no-op.",
+        "rejects any mismatch. Retrying after a partial failure pays only unpaid rows; calling it again after success is a no-op. " +
+        "Wallet mode: the confirmed total is locked and the result is status AWAITING_SIGNATURE with a signUrl; no USDC moves " +
+        "until the founder opens signUrl in their own browser and signs the payouts from their wallet. Poll fundraise_get_sign_request.",
       inputSchema: {
         distributionId: z.string().min(1).describe("Distribution id that was snapshotted"),
         confirmTotal: usdcAmount.describe(
           'The total the founder typed, verbatim, as a USDC decimal string (e.g. "4000" or "4,000.00"). Not base units.',
         ),
+        signingMode,
       },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
     },
-    async ({ distributionId, confirmTotal }) =>
-      forward(() => api("POST", `/distributions/${encodeURIComponent(distributionId)}/execute`, { confirmTotal })),
+    async ({ distributionId, confirmTotal, signingMode }) =>
+      forward(() => api("POST", `/distributions/${encodeURIComponent(distributionId)}/execute`, { confirmTotal, signingMode })),
   );
 
   server.registerTool(
