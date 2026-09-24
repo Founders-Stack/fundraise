@@ -13,6 +13,7 @@ import {
   validateCashFlowTerms,
   type CashFlowTerms,
 } from "./index";
+import { CLUSTERS } from "../cluster";
 
 const USDC = 1_000_000n;
 
@@ -89,6 +90,17 @@ describe("deriveLaunchPricing", () => {
 describe("agreement", () => {
   const md = renderAgreement(ACME_DEMO_TERMS);
 
+  it("takes its banner from lib/cluster (devnet vs mainnet pilot)", () => {
+    const dev = renderAgreement(ACME_DEMO_TERMS, CLUSTERS.devnet);
+    const main = renderAgreement(ACME_DEMO_TERMS, CLUSTERS["mainnet-beta"]);
+    expect(dev.split("\n")[0]).toContain("DEMO — devnet prototype, not an offer of securities");
+    expect(main.split("\n")[0]).toContain("Closed mainnet pilot. Not an offer of securities.");
+    expect(main).not.toMatch(/devnet/i);
+    expect(dev).not.toMatch(/mainnet/i);
+    expect(lintCopy(main)).toEqual([]);
+    expect(agreementHash(dev)).not.toBe(agreementHash(main));
+  });
+
   it("has the DEMO header and key terms", () => {
     expect(md).toContain("DEMO — devnet prototype, not an offer of securities");
     expect(md.split("\n")[0]).toContain("DEMO");
@@ -150,6 +162,9 @@ describe("COPY / lintCopy", () => {
     expect(strings.length).toBeGreaterThan(10);
     for (const s of strings) expect(lintCopy(s)).toEqual([]);
     expect(COPY.onboardingSteps.verifyIdentity).toBe("Verify identity");
+    expect(COPY.demoCustody).toBe("Demo custody (devnet)");
+    expect(COPY.demoBanner).toBe("DEMO — devnet prototype, not an offer of securities");
+    expect(COPY.clusterBadge).toBe("Devnet");
   });
 
   it("flags forbidden terms, allows negated ones", () => {
@@ -161,5 +176,24 @@ describe("COPY / lintCopy", () => {
     expect(lintCopy("There are no guaranteed returns.")).toEqual([]);
     // negation in a previous sentence does not carry over
     expect(lintCopy("Not advice. Guaranteed returns.")).toHaveLength(1);
+  });
+});
+
+describe("COPY on mainnet-beta", () => {
+  it("custody label, banner and badge switch with SOLANA_CLUSTER", () => {
+    const prev = process.env.SOLANA_CLUSTER;
+    process.env.SOLANA_CLUSTER = "mainnet-beta";
+    try {
+      expect(COPY.demoCustody).toBe("Team custody (closed pilot)");
+      expect(COPY.demoBanner).toContain("Closed mainnet pilot. Not an offer of securities.");
+      expect(COPY.clusterBadge).toBe("Mainnet pilot");
+      for (const s of [COPY.demoCustody, COPY.demoBanner, COPY.clusterBadge]) {
+        expect(lintCopy(s)).toEqual([]);
+        expect(s).not.toMatch(/devnet/i);
+      }
+    } finally {
+      if (prev === undefined) delete process.env.SOLANA_CLUSTER;
+      else process.env.SOLANA_CLUSTER = prev;
+    }
   });
 });

@@ -2,7 +2,7 @@ import { ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { explorerAddress, explorerTx, isSimulatedSig, shortAddr } from "@/components/format";
 
-/** Tx signature → Solana Explorer (devnet). Fake-chain signatures render as a muted "simulated" chip. */
+/** Tx signature → Solana Explorer (active cluster, lib/cluster). Fake-chain signatures render as a muted "simulated" chip. */
 export function TxLink({ sig, className, chars = 6 }: { sig: string | null | undefined; className?: string; chars?: number }) {
   if (!sig) return <span className="text-muted-foreground">—</span>;
   if (isSimulatedSig(sig)) {

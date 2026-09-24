@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { WalletButton } from "@/components/wallet-button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { currentCluster } from "@/lib/cluster";
 
 export function Logo() {
   return (
@@ -30,7 +31,7 @@ export function SiteHeader() {
         <div className="flex items-center gap-1.5 sm:gap-2">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning-soft px-2 py-0.5 text-[11px] font-medium text-warning sm:px-2.5 sm:py-1">
             <span className="size-1.5 rounded-full bg-warning" />
-            Devnet
+            {currentCluster().copy.badge}
           </span>
           <ThemeToggle />
           <div className="fs-wallet">
