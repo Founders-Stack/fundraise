@@ -35,6 +35,7 @@ ALICE_PUBKEY=<tester wallet>     # read-only balance checks
 BOB_PUBKEY=<tester wallet>
 DATABASE_URL=postgres://...
 FS_API_TOKEN=<new random token>
+DISTRIBUTION_PAYOUT_MODE=direct  # batched transfers; escrow (A25) is not yet verified on-chain
 ```
 
 Load it into your shell for the commands below: `set -a; . ./.env.mainnet; set +a`. (`scripts/chain/run.sh` always reads the repo `.env`, so the commands below call `tsx --env-file=.env.mainnet` directly. Variables you export in the shell take precedence over the file.)
@@ -46,12 +47,13 @@ cd apps/web && pnpm exec tsx --env-file=../../.env.mainnet ../../scripts/chain/m
 ```
 Expect PASS on the cluster, RPC genesis, USDC mint, DBC plus hook instruction, and FS authority ≥ 2 SOL. The fs_allowlist check is a WARN until step 2.
 
-## 2. Deploy the gated fs_allowlist (A23, after the A27 fix is merged)
+## 2. Deploy the gated fs_allowlist (A27 build)
 
 ```
 cd programs/fs_allowlist
 git log -1 --oneline                         # record the commit hash: it must be the gated build (H12)
-anchor build
+FS_AUTHORITY_MAINNET=$(solana-keygen pubkey "$FS_AUTHORITY_KEYPAIR") \
+  anchor build -- --features mainnet   # A27: bakes the mainnet FS authority into the gate
 solana program deploy target/deploy/fs_allowlist.so \
   --url "$RPC_URL" --keypair "$FS_AUTHORITY_KEYPAIR" \
   --program-id target/deploy/fs_allowlist-keypair.json \
