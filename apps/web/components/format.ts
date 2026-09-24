@@ -1,3 +1,5 @@
+import { explorerAddressUrl, explorerTxUrl } from "@/lib/cluster";
+
 // Client-safe display helpers. Inputs are base-unit strings (6 dp) as returned by the API.
 
 const DP = 6;
@@ -86,11 +88,11 @@ export function isSimulatedSig(sig: string | null | undefined) {
 }
 
 export function explorerTx(sig: string) {
-  return `https://explorer.solana.com/tx/${sig}?cluster=devnet`;
+  return explorerTxUrl(sig);
 }
 
 export function explorerAddress(addr: string) {
-  return `https://explorer.solana.com/address/${addr}?cluster=devnet`;
+  return explorerAddressUrl(addr);
 }
 
 /** Plain JSON (bigint → string, Date → ISO) so server data can be passed to client components. */

@@ -14,6 +14,14 @@ import {
   SendTransactionError,
 } from "@solana/web3.js";
 
+import {
+  clusterAllowlistProgramId,
+  clusterQuoteMint,
+  clusterRpcUrl,
+  explorerAddressUrl,
+  explorerTxUrl,
+} from "../../cluster";
+
 export const COMMITMENT: Commitment = "confirmed";
 
 /** Repo root: env paths like `keys/x.json` are resolved from here (or from cwd/../.. for apps/web). */
@@ -55,8 +63,8 @@ let cachedEnv: DevnetEnv | null = null;
 
 export function devnetEnv(opts: { requireQuoteMint?: boolean } = {}): DevnetEnv {
   if (cachedEnv && (cachedEnv.quoteMint || !opts.requireQuoteMint)) return cachedEnv;
-  const rpcUrl = process.env.RPC_URL || "https://api.devnet.solana.com";
-  const quote = process.env.QUOTE_MINT;
+  const rpcUrl = clusterRpcUrl();
+  const quote = clusterQuoteMint();
   if (opts.requireQuoteMint !== false && !quote) throw new Error("QUOTE_MINT is not set");
   const env: DevnetEnv = {
     connection: new Connection(rpcUrl, { commitment: COMMITMENT, disableRetryOnRateLimit: false }),
@@ -64,9 +72,7 @@ export function devnetEnv(opts: { requireQuoteMint?: boolean } = {}): DevnetEnv 
     fsAuthority: loadKeypair(req("FS_AUTHORITY_KEYPAIR")),
     issuer: loadKeypair(req("ISSUER_KEYPAIR")),
     quoteMint: quote ? new PublicKey(quote) : PublicKey.default,
-    allowlistProgram: new PublicKey(
-      process.env.FS_ALLOWLIST_PROGRAM_ID || "3gfXWxgHN8tjJzxXGeAEiZWaixDe7ZMxXQGnpvHkQZu7",
-    ),
+    allowlistProgram: new PublicKey(clusterAllowlistProgramId()),
   };
   if (quote) cachedEnv = env;
   return env;
@@ -257,8 +263,8 @@ async function fetchLogs(connection: Connection, sig: string): Promise<string[]>
   }
 }
 
-export const explorerTx = (sig: string) => `https://explorer.solana.com/tx/${sig}?cluster=devnet`;
-export const explorerAddr = (a: string) => `https://explorer.solana.com/address/${a}?cluster=devnet`;
+export const explorerTx = (sig: string) => explorerTxUrl(sig);
+export const explorerAddr = (a: string) => explorerAddressUrl(a);
 
 /** Demo test wallets (alice/bob/carol/issuer/fs-authority) live next to FS_AUTHORITY_KEYPAIR. Scripts only. */
 export function demoKeypair(name: string): Keypair {

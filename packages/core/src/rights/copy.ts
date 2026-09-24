@@ -1,4 +1,7 @@
 // UI / skill microcopy (SPEC section 13) and a tiny forbidden-term linter.
+// Cluster-specific wording (custody label, banner, badge) comes from lib/cluster (SPEC section 14).
+
+import { currentCluster } from "../cluster";
 
 export const COPY = {
   positioning: {
@@ -15,8 +18,18 @@ export const COPY = {
   annualizedFromPeriods: (n: number) => `annualized from ${n} period${n === 1 ? "" : "s"}`,
   unallocated: "Unallocated (retained by issuer)",
   marketCap: "Token market cap — not company valuation",
-  demoCustody: "Demo custody (devnet)",
-  demoBanner: "DEMO — devnet prototype, not an offer of securities",
+  /** Custody label for the active cluster (lib/cluster). */
+  get demoCustody(): string {
+    return currentCluster().copy.custody;
+  },
+  /** Banner for the active cluster (lib/cluster). */
+  get demoBanner(): string {
+    return currentCluster().copy.banner;
+  },
+  /** Header badge for the active cluster (lib/cluster). */
+  get clusterBadge(): string {
+    return currentCluster().copy.badge;
+  },
   nextRecordDate: "Next record date",
   // One screen, one signature (SPEC section 6). There is no identity step: `verifiedAt` means self-attested.
   onboardingSteps: {

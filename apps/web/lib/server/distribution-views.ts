@@ -10,6 +10,7 @@ import {
 } from "@fstack/core";
 import type { Allocation, Distribution, Participant } from "@prisma/client";
 import { getChain } from "@/lib/chain";
+import { explorerTxUrl as clusterExplorerTxUrl } from "@/lib/cluster";
 import { pctDisplay, pctOfSupply, tokenAmount, usdc } from "./money";
 import type { IssuanceRecord } from "./issuance-record";
 
@@ -20,7 +21,7 @@ export type DistributionWithAll = Distribution & {
 };
 
 export function explorerTxUrl(signature: string, mode: "fake" | "devnet"): string | null {
-  return mode === "fake" ? null : `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
+  return mode === "fake" ? null : clusterExplorerTxUrl(signature);
 }
 
 export function executionLeaseHeld(d: Pick<Distribution, "executingUntil">, now = new Date()): boolean {

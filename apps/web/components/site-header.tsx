@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { WalletButton } from "@/components/wallet-button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { currentCluster } from "@/lib/cluster";
 
 /** Founder Stack brand mark: an accent ring with a dot (f-stack.ai). */
 export function Logo({ className = "size-[27px]" }: { className?: string }) {
@@ -31,7 +32,7 @@ export function SiteHeader() {
         <div className="flex items-center gap-1.5 sm:gap-2">
           <span className="inline-flex items-center gap-[7px] rounded-[3px] border bg-card px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground">
             <i className="size-1.5 rounded-full bg-warning shadow-[0_0_0_3px_var(--warning-soft)]" />
-            devnet
+            {currentCluster().copy.badge}
           </span>
           <ThemeToggle />
           <div className="fs-wallet">

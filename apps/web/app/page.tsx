@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, ArrowUpRight, Bot, ShieldCheck, Landmark, Waves } from "lucide-react";
 import { COPY } from "@fstack/core";
+import { currentCluster } from "@/lib/cluster";
 import { listIssuances } from "@/lib/server/issuance-record";
 import { getMarketView } from "@/lib/server/market";
 import { CodeBlock } from "@/components/code-block";
@@ -53,7 +54,7 @@ export default async function Home() {
       {/* ------------------------------------------------------------ hero */}
       <section className="fs-backdrop -mx-4 -mt-8 grid items-center gap-10 px-4 pt-10 pb-6 sm:-mx-6 sm:-mt-10 sm:px-6 sm:pt-14 lg:grid-cols-[1.1fr_1fr]">
         <div className="space-y-6">
-          <p className="eyebrow">Cash Flow Rights · Solana devnet</p>
+          <p className="eyebrow">Cash Flow Rights · {currentCluster().copy.networkLabel}</p>
           <h1 className="text-[clamp(2.5rem,5.4vw,4rem)] leading-[0.92] font-semibold tracking-[-0.055em] text-balance">
             Raise against your cash flow,{" "}
             <em className="serif-accent text-[1.06em] tracking-[-0.03em]">from your coding agent</em>
