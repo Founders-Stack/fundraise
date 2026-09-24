@@ -9,6 +9,9 @@ import { POST as executePOST } from "@/app/api/distributions/[id]/execute/route"
 import { POST as claimPOST } from "@/app/api/distributions/[id]/claim/route";
 import { GET as proofGET } from "@/app/api/distributions/[id]/proof/route";
 import { claimMessage } from "@/lib/server/escrow";
+
+// The default mode is under test here; a developer .env may set DISTRIBUTION_PAYOUT_MODE=direct.
+delete process.env.DISTRIBUTION_PAYOUT_MODE;
 import { fake } from "./fake-chain";
 import { call, get, launch, onboard, post } from "./helpers";
 

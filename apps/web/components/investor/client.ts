@@ -15,7 +15,7 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, init?: { method?: string; body?: unknown; signal?: AbortSignal }): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}${path}`, {
     method: init?.method ?? "GET",
     headers: init?.body === undefined ? undefined : { "content-type": "application/json" },
     body: init?.body === undefined ? undefined : JSON.stringify(init.body),

@@ -56,7 +56,7 @@ export function NewIssuanceForm() {
         ? issuerRequest("/api/issuances/preview", token, previewBody(values))
         : issuerRequest("/api/issuances", token, { previewId: preview!.previewId });
     try {
-      const res = await fetch(req.url, req.init);
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}${req.url}`, req.init);
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError({ message: body.message ?? `Request failed (${res.status})`, errors: body.details?.errors });
