@@ -2,6 +2,7 @@
 // Demo custody (SPEC 0.4): the server holds the Founder Stack authority and issuer keys (devnet only).
 import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import bs58 from "bs58";
 import {
   Connection,
   Keypair,
@@ -45,8 +46,16 @@ function req(name: string): string {
   return v;
 }
 
-export function loadKeypair(path: string): Keypair {
-  const raw = JSON.parse(readFileSync(resolvePath(path), "utf8"));
+/**
+ * Loads a keypair from an env value. Serverless (Vercel) has no keys/ dir, so the value may be
+ * the secret itself: a JSON byte array (`[12,34,...]`) or a base58 secret key. Anything else
+ * is treated as a file path (local dev / scripts).
+ */
+export function loadKeypair(value: string): Keypair {
+  const v = value.trim();
+  if (v.startsWith("[")) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(v)));
+  if (/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(v)) return Keypair.fromSecretKey(bs58.decode(v));
+  const raw = JSON.parse(readFileSync(resolvePath(v), "utf8"));
   return Keypair.fromSecretKey(Uint8Array.from(raw));
 }
 

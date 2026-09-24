@@ -7,6 +7,29 @@ the server just **forwards your bearer token** and returns the API's JSON.
 
 > Skills are the conversation, the MCP server is the hands, the API is the brain.
 
+## Quick start (npx)
+
+```bash
+FS_API_URL=https://<your-deployment>.vercel.app/api FS_API_TOKEN=<token> npx -y fstack-mcp
+```
+
+Claude Code:
+
+```bash
+claude mcp add fstack -e FS_API_URL=https://<your-deployment>.vercel.app/api -e FS_API_TOKEN=<token> -- npx -y fstack-mcp
+```
+
+Codex (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.fstack]
+command = "npx"
+args = ["-y", "fstack-mcp"]
+env = { FS_API_URL = "https://<your-deployment>.vercel.app/api", FS_API_TOKEN = "..." }
+```
+
+The server speaks MCP over stdio; it prints nothing else to stdout.
+
 ## Configuration
 
 | Env | Default | Purpose |
@@ -56,7 +79,7 @@ stop and show the message (e.g. `401` → check `FS_API_TOKEN`).
 ## Build and run
 
 ```bash
-pnpm --filter @fstack/mcp build
+pnpm --filter fstack-mcp build
 FS_API_URL=http://localhost:3000/api FS_API_TOKEN=... node packages/fstack-mcp/dist/index.js
 ```
 
