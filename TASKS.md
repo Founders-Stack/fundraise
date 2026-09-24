@@ -2,10 +2,38 @@
 
 Source of truth: [SPEC.md](SPEC.md). **Core feature:** `/fstack:fundraise` skill family + `fstack` MCP server, so founders operate from Claude Code / Codex (SPEC section 0). Hours are relative to T0 = kickoff. Deadline Sep 25, 4:00pm ET.
 
+**Scope decision (2026-09-25): devnet only for testing, video and submission. Mainnet A29/U12/H13 are deferred and do not block submission. Use mock USDC and devnet SOL; no real-fund wallet funding.**
+
 **Legend:**
 - 🤖 = agent task (can run in its own git worktree).
 - 👤 = you.
 - **Deps** = tasks that must finish first.
+
+---
+
+## Follow-up audit — 2026-09-24
+
+The wave tables below are the original plan, not completion tracking. Repository inspection found
+implementations and local tests for wallet signing (A24), escrow claims (A25), web issuance/report
+memo/chart (A26), cluster copy (A28), and the landing page (A30). Their presence does not establish
+mainnet verification. A29's on-chain evidence remains blank in `docs/mainnet-pilot.md`; U13/U15 need
+the recording and actual pilot links. These are not claimed complete by this audit.
+
+Five independent, locally actionable fixes selected before the pilot:
+
+| ID | Priority | Task | Status / evidence |
+|---|---|---|---|
+| A31 | P0 | Preserve deployment prefix in API-generated market, invite and signing URLs | Implemented; root and `/fundraise` regression cases in `api-hardening.test.ts` |
+| A32 | P0 | Keep unexpected server error details out of public API responses | Implemented; generic 500 response, server logging retained; regression test |
+| A33 | P0 | Validate swap owner, disambiguate amount mode, bound slippage to 0–10000 bps | Implemented; malformed-input and valid exact-output regression cases |
+| A34 | P1 | Parse supporting report URLs and reject invalid addresses or embedded credentials | Implemented; invalid URL cases and signed-query preservation tested |
+| A35 | P1 | Bound MCP API waits, including body reads, without automatically replaying mutations | Implemented; configurable 120-second timeout; MCP client tests |
+
+Validation: `pnpm test` passed (126 tests: 69 core, 52 web, 5 MCP); web and MCP typechecks
+passed; `git diff --check` passed. Tests use the fake chain. The separate HTTP demo
+(`pnpm demo:e2e`) was attempted twice, including with `/private/tmp`, but stopped before the
+server started: Prisma `db push` returned `Schema engine error` for the throwaway SQLite DB.
+That demo remains unverified in this environment. No mainnet transactions or deployment were performed.
 
 ---
 
@@ -15,9 +43,9 @@ Source of truth: [SPEC.md](SPEC.md). **Core feature:** `/fstack:fundraise` skill
 |---|---|---|
 | U1 | Register the team on hackathons.solana.com/hackathons/stocklana (if not done) | Account creation |
 | U2 | Create the GitHub repo, `git init` here, push an empty main | Your account |
-| U3 | Get devnet **and mainnet** RPC keys (Helius or similar, with DAS for by-mint token queries) and put them in `.env.local` as `NEXT_PUBLIC_RPC_URL` / `RPC_URL` | Secrets / signup |
-| U4 | Install Phantom (or Backpack) and create 3 accounts: Alice, Bob, Carol. Use them on devnet first; for the mainnet pilot fund Alice (~$120 USDC), Bob (~$50 USDC) and all three with ~0.05 SOL | Wallet UI + real funds; you'll record with these |
-| U5 | Fund the FS authority + issuer keypairs with devnet SOL (faucet.solana.com, which may need a captcha). Before T+40h: fund the mainnet deployer with ~2–4 SOL for `fs_allowlist` rent, and keep the mainnet hot wallets within the SPEC section 14 caps | Captcha / real funds |
+| U3 | Get devnet RPC keys (Helius or similar, with DAS for by-mint token queries) and put them in `.env.local` as `NEXT_PUBLIC_RPC_URL` / `RPC_URL` | Secrets / signup |
+| U4 | Install Phantom (or Backpack) and create 3 accounts: Alice, Bob, Carol. Fund all three with devnet SOL and faucet mock USDC for the demo | Wallet UI; you'll record with these on devnet |
+| U5 | Fund the FS authority + issuer keypairs with devnet SOL (faucet.solana.com, which may need a captcha). | Captcha |
 | U6 | Make sure **Codex CLI** is installed and logged in next to Claude Code | Your login |
 
 ---
@@ -27,7 +55,7 @@ Source of truth: [SPEC.md](SPEC.md). **Core feature:** `/fstack:fundraise` skill
 | ID | 🤖 Task | Deliverable | Deps | Validates |
 |---|---|---|---|---|
 | A1 | **Scaffold.** Monorepo per SPEC section 3: `apps/web` (Next.js App Router, TS, Tailwind, shadcn, wallet adapter devnet, Prisma + SQLite, data model), `packages/fstack-mcp` (empty MCP server, zod, `FS_API_URL`/`FS_API_TOKEN`), `plugins/fstack` (plugin.json, `.mcp.json`, empty `skills/`), `.agents/skills` symlinks. API bearer-token auth middleware. `lib/cluster` selected by `SOLANA_CLUSTER` (RPC, quote mint, program IDs, explorer links, banner copy) | `pnpm dev` runs; MCP server starts; plugin loads in Claude Code | U2 | — |
-| A2 | **DBC hook spike.** SPL mock USDC + faucet script. DBC config + pool via `createConfigAndPoolWithTransferHook` with a no-op hook; one `swap2WithTransferHook` buy + sell on devnet. Mainnet half of H1: `createConfigWithTransferHook` alone (no pool) to prove the deployed program has the hook instructions | `scripts/spike-dbc-hook.ts`, `docs/spike-results.md` with sigs + PASS/FAIL | U3, U5 | **H1, H3** |
+| A2 | **DBC hook spike.** SPL mock USDC + faucet script. DBC config + pool via `createConfigAndPoolWithTransferHook` with a no-op hook; one `swap2WithTransferHook` buy + sell on devnet. | `scripts/spike-dbc-hook.ts`, `docs/spike-results.md` with sigs + PASS/FAIL | U3, U5 | **H1, H3** |
 | A3 | **`fs_allowlist` program.** Anchor Token-2022 hook per SPEC section 4; local tests allowed ✅ / not ❌; deploy to devnet | `programs/fs_allowlist`, program ID, tests green | toolchain | **H2** (partial) |
 | A4 | **`lib/monetization`.** `toDbcFeeParams`, `projectEconomics`, validation; tests incl. DEMO→{50,96}, SOFTWARE→{50,100}, "only config changes" test | Module + tests | — | — |
 | A5 | **`lib/distribution` math.** R1/R5/R7 pure functions; tests with the Q3/Q4 demo numbers | Module + tests | — | — |
@@ -64,7 +92,7 @@ Source of truth: [SPEC.md](SPEC.md). **Core feature:** `/fstack:fundraise` skill
 | A17 | **Distribution API + MCP.** `POST /api/issuances/:id/distributions` (period, DCF, reportUrl → `reportHash`), `POST /api/distributions/:id/snapshot`, `POST /api/distributions/:id/execute` (requires `confirmTotal` = snapshot total; checks issuer USDC balance; batched transfers; stores sigs; advances `nextRecordDate`). MCP `fundraise_report_period`, `fundraise_snapshot`, `fundraise_execute_distribution` | Routes + tools + tests | A5, A13 | **H7** |
 | A18 | **Skills `fundraise-report` + `fundraise-distribute`.** Report: can read a local CSV/XLSX and propose DCF with its working shown; the founder confirms. Distribute: allocation table → the founder types the total → execute → sigs + explorer links. Include 3 sample finance exports in `demo/finance/` | 2 SKILL.md + sample files | A17 | **H11** |
 | A19 | **`/distributions/[id]`** read-only history + sigs; `/` page with the Claude Code / Codex install block | Pages | A17 | — |
-| A20 | **E2E demo script.** Headless SPEC section 10 run: launch via API → Carol fails → Alice buys → Q3 → trade → Q4. `DEMO_SCALE` = 1 on devnet (asserts 4,000 / 2,700 / 1,800 USDC) and 0.001 on mainnet (asserts 4.00 / 2.70 / 1.80). Also resets state for recording | `scripts/demo-e2e.ts` | A8–A19 | full loop |
+| A20 | **E2E demo script.** Headless SPEC section 10 run: launch via API → Carol fails → Alice buys → Q3 → trade → Q4. `DEMO_SCALE` = 1 on devnet (asserts 4,000 / 2,700 / 1,800 USDC) with mock USDC. Also resets state for recording | `scripts/demo-e2e.ts` | A8–A19 | full loop |
 
 **⏱ T+36h 👤 (U8): submit a draft.** Repo + rough screen capture. Edits are allowed until the deadline.
 
@@ -77,23 +105,23 @@ Source of truth: [SPEC.md](SPEC.md). **Core feature:** `/fstack:fundraise` skill
 | A21 🤖 | Code review + QA: web pages, and a dry run of every skill in both agents (no skipped confirmations, no "dividend"/"valuation"/bare "non-dilutive" wording, fees visible) | A20 |
 | A22 🤖 | README: one-liner, layer diagram (SPEC section 0.1), install for Claude Code + Codex, verified-facts table, program IDs, demo sigs | A20 |
 | A23 🤖 | Deploy the web/API to Vercel with Postgres (SQLite doesn't persist there), devnet first. Point the MCP `FS_API_URL` at it and publish `fstack-mcp` for `npx` | A20, U9 |
-| A27 🤖 | **`fs_allowlist` front-run fix (H12, mainnet blocker).** Gate `initialize` to the FS authority and bundle it into the pool-creation tx. Test: non-authority `initialize` fails. Done before T+40h | A8 |
+| A27 🤖 | **`fs_allowlist` front-run fix (H12, initialization protection).** Gate `initialize` to the FS authority and bundle it into the pool-creation tx. Test: non-authority `initialize` fails. Done before T+40h | A8 |
 | A28 🤖 | **Cluster copy.** Agreement banner, `demoCustody` label and header badge come from `lib/cluster`: "Closed mainnet pilot. Not an offer of securities." on mainnet, devnet wording on devnet. Update the rights tests | A6 |
-| A29 🤖 | **Mainnet cutover (H13), T+40–44h.** Deploy the gated `fs_allowlist` to mainnet, set `SOLANA_CLUSTER=mainnet-beta`, create the Acme pilot pool (1,000 supply, real USDC, threshold far above pilot buys), run A20 with `DEMO_SCALE=0.001`, record sigs in `docs/mainnet-pilot.md` | A20, A23, A27, A28, U12 |
-| A30 🤖 | **Landing page** (SPEC section 9.1), T+48–52h, in parallel with U13. Sections above the issuances list on `/`; links video + mainnet sigs; passes `lintCopy`. Timebox 3h | A29 |
+| A29 🤖 | **Deferred: mainnet cutover (H13).** Outside current submission scope; retained runbook is future reference only | Not required |
+| A30 🤖 | **Landing page** (SPEC section 9.1), T+48–52h, in parallel with U13. Sections above the issuances list on `/`; links video + devnet sigs; passes `lintCopy`. Timebox 3h | A20, A23 |
 | A24 🤖 **P1** | `/sign/[requestId]` wallet-signing links replacing server custody for mutating tools | A20 green |
 | A25 🤖 **P1** | Escrow + Merkle claim; `fundraise-distribute` switches to "fund escrow → holders claim" | A20 green |
 | A26 🤖 **P1** | `/issuance/new` web fallback; report-hash memo; price chart; H5 migration test (1h, report only) | A20 green |
 
 | ID | 👤 Task | When |
 |---|---|---|
-| U9 | Vercel project + Postgres + env vars (RPC, program IDs, issuer/authority secrets for devnet, then mainnet; keep them out of the repo) | T+36h |
+| U9 | Vercel project + Postgres + env vars (RPC, program IDs, issuer/authority secrets for devnet; keep them out of the repo) | T+36h |
 | U10 | DM 5 profitable founders with the P1 question (SPEC section 11); answers go in `docs/evidence.md`. Bonus: ask whether they'd rather do this from Claude Code / Codex | Anytime, early |
 | U11 | Review the agreement template, positioning, and the skill confirmation wording | After A6 / A12 |
-| U12 | Mainnet is decided (SPEC section 14). Fund the mainnet wallets within the caps and send invite links only to the team + named testers | T+40h |
-| U13 | Record the ≤ 3-min split-screen video **on mainnet** at pilot scale (terminal \| browser, SPEC section 10). Rehearse on devnet with A20 first. Rehearse the agent prompts so the takes are short | T+44–50h |
-| U15 | **TODO later:** after U13, paste the video URL, hackathon URL, pilot `marketId`, pool/mint addresses and mainnet signatures into `apps/web/lib/landing.ts` (`LANDING_LINKS`, `LANDING_PILOT`), then redeploy | After U13 |
-| U14 | Final submission: repo, landing page / live URL, video, mainnet program + pool addresses and sigs, description, agent install snippet | Before Sep 25, 4:00pm ET |
+| U12 | **Deferred: mainnet wallet funding.** No real funds required for the devnet submission | Not required |
+| U13 | Record the ≤ 3-min split-screen video **on devnet** with mock USDC at `DEMO_SCALE=1` (terminal \| browser, SPEC section 10). Rehearse with A20 first. Rehearse the agent prompts so the takes are short | T+44–50h |
+| U15 | **TODO later:** after U13, paste the video URL, hackathon URL, pilot `marketId`, pool/mint addresses and devnet signatures into `apps/web/lib/landing.ts` (`LANDING_LINKS`, `LANDING_PILOT`), then redeploy | After U13 |
+| U14 | Final submission: repo, landing page / live URL, video, devnet program + pool addresses and sigs, description, agent install snippet | Before Sep 25, 4:00pm ET |
 
 ---
 
@@ -105,7 +133,7 @@ U3,U5 → A2 ─┐                    │
         A3 ─┴→ U7 (T+6) → A8     │
               A9 → A10 → A11 → A12 (launch from agent)
                           A13 → A14, A15, A16
-                  A5 → A17 → A18 ────→ A20 → U8 (T+36) → A27, A28 → A29 (mainnet, T+40–44) → U13 → U14
+                  A5 → A17 → A18 ────→ A20 → U8 (T+36) → A27, A28 → devnet verification → U13 → U14
                                                                     └→ A30 (landing, T+48–52, parallel with U13) → U14
 ```
 

@@ -1,5 +1,7 @@
 # Mainnet pilot runbook (A29, SPEC section 14)
 
+> **Deferred 2026-09-25.** Current testing, video and submission use devnet only. This runbook is historical/future reference, not an active task or authorization to deploy or fund mainnet.
+
 Closed mainnet pilot with real USDC. Follow the steps in order. Every step before step 5 is read-only.
 If the loop isn't green by hour 44, use the H13 fallback: record on devnet and say plainly which steps ran on mainnet.
 

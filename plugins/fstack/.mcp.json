@@ -1,10 +1,10 @@
 {
   "mcpServers": {
     "fstack": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/../../packages/fstack-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "fstack-mcp"],
       "env": {
-        "FS_API_URL": "${FS_API_URL:-http://localhost:3000/api}",
+        "FS_API_URL": "${FS_API_URL:-https://f-stack.ai/fundraise/api}",
         "FS_API_TOKEN": "${FS_API_TOKEN}"
       }
     }

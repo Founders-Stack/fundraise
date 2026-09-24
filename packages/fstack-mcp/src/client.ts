@@ -22,12 +22,30 @@ export async function api<T = unknown>(
   if (FS_API_TOKEN) headers.authorization = `Bearer ${FS_API_TOKEN}`;
   if (body !== undefined) headers["content-type"] = "application/json";
 
-  const res = await fetch(`${FS_API_URL}${path}`, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const text = await res.text();
+  const timeoutMs = Number(process.env.FS_API_TIMEOUT_MS ?? 120_000);
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
+    throw new Error("FS_API_TIMEOUT_MS must be a positive integer up to 2147483647");
+  }
+  const signal = AbortSignal.timeout(timeoutMs);
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(`${FS_API_URL}${path}`, {
+      method,
+      signal,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    text = await res.text();
+  } catch (error) {
+    if (signal.aborted) {
+      throw new ApiError(504, {
+        error: "api_timeout",
+        message: `API request timed out after ${timeoutMs}ms. Its outcome is unknown. Check issuance/distribution status before retrying a mutation.`,
+      });
+    }
+    throw error;
+  }
   let parsed: unknown = text;
   try {
     parsed = text ? JSON.parse(text) : null;

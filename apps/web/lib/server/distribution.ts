@@ -91,8 +91,12 @@ export async function reportPeriod(issuanceId: string, input: unknown) {
   }
   let reportUrl: string | undefined;
   if (body.reportUrl !== undefined && body.reportUrl !== null && body.reportUrl !== "") {
-    if (typeof body.reportUrl !== "string" || !/^https?:\/\/\S+$/i.test(body.reportUrl)) {
-      throw new HttpError(400, "invalid_report_url", "reportUrl must be an http(s) URL");
+    try {
+      if (typeof body.reportUrl !== "string" || /\s/.test(body.reportUrl)) throw new Error();
+      const url = new URL(body.reportUrl);
+      if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password) throw new Error();
+    } catch {
+      throw new HttpError(400, "invalid_report_url", "reportUrl must be a valid http(s) URL without credentials");
     }
     reportUrl = body.reportUrl;
   }

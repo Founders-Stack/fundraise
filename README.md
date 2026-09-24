@@ -34,7 +34,7 @@ Founder (Claude Code / Codex)                      Investor (browser)
                                                        meteora, distribution,
                                                        monetization
                                                             │
-                                               Solana mainnet (final) / devnet (dev):
+                                               Solana devnet (demo and submission):
                                                Token-2022 + fs_allowlist hook
                                                + Meteora DBC + USDC (mock on devnet)
 ```
@@ -158,7 +158,7 @@ see [`docs/spike-results.md`](docs/spike-results.md) for full signatures. Summar
 | DBC pool authority | `FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM` |
 | DBC hook pool (H1) | `FasBGFcGwSJDiTPHRevPqdb5r6AZno7xgRxgYFbTsGVq`, mint `FXkHNJKpZMsUYmkp7eYWub7Vs3niaZzMoz1CUb4wp3na` |
 
-Mainnet program ID, pool and USDC addresses: **pending (A29)**.
+Submission scope: **devnet only**, using mock USDC. Mainnet deployment is deferred.
 
 ### Demo signatures (devnet)
 
@@ -172,7 +172,7 @@ Mainnet program ID, pool and USDC addresses: **pending (A29)**.
 | Alice sells half (H2) | `6521tUsop4jMdJHjVNXxTT68deG6ZzC1MZqatLkiJGCu6928yLUM3ASUt5tAbPTU5s9tvpxJ5NzQNzvPuqMc34Gq` |
 | Migration to DAMM v2 (H5) | `61VorSrsQnLiTdEZzYeEhGpj8p6GpqvJRAjxNFXogeRKkAMugcWQxaFLRrfXnEXD6Si4waneLvqrf74f4Cxmqgy4` |
 | USDC payout batch (ports smoke) | `2zjPdiuKUZHKKda74QRVmCZh8jAk5RhsUgBRKnif8Gu6A5dF9o4TmYSgmWjWyuNd7HmPvPBzWaASDgnzfvD4Wt2g` |
-| Mainnet pilot (Acme, `DEMO_SCALE=0.001`) | pending (A29), to be recorded in `docs/mainnet-pilot.md` |
+| Submission demo | Devnet, `DEMO_SCALE=1`, mock USDC; record the final demo signatures before submission |
 
 ## Demo (SPEC section 10)
 
@@ -193,7 +193,7 @@ Don't say: shares, equity, words that imply a corporate payout (see `lintCopy`),
 
 ## Status / roadmap
 
-P0 (this build): full issuance → onboarding → trading → distribution loop on devnet, from both agents; mainnet pilot pending (A29).
+P0 (this build): full issuance → onboarding → trading → distribution loop on devnet, from both agents; mainnet pilot deferred and not required for submission.
 P1 (not in this build, see `SPEC.md` sections 1 and 15): `/sign/[requestId]` wallet-signing links in
 place of server custody, issuer-funded escrow + Merkle claim, a price chart, an on-chain report-hash
 memo, and Venture Rights (the same engine against a one-time exit event instead of periodic cash flow).

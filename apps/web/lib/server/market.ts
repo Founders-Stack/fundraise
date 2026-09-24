@@ -359,11 +359,17 @@ export type SwapMode = "EXACT_IN" | "EXACT_OUT";
  * `mode` is optional: passing only `amountOut` implies EXACT_OUT.
  */
 export function parseSwapAmount(src: { amountIn?: unknown; amountOut?: unknown; mode?: unknown }): { mode: SwapMode; amount: bigint } {
+  if (src.mode !== undefined && src.mode !== null && typeof src.mode !== "string") {
+    throw new HttpError(400, "invalid_input", "mode must be EXACT_IN or EXACT_OUT");
+  }
   const rawMode = typeof src.mode === "string" ? src.mode.toUpperCase() : "";
   if (rawMode && rawMode !== "EXACT_IN" && rawMode !== "EXACT_OUT") {
     throw new HttpError(400, "invalid_input", "mode must be EXACT_IN or EXACT_OUT");
   }
   const has = (v: unknown) => v !== undefined && v !== null && v !== "";
+  if (has(src.amountIn) && has(src.amountOut)) {
+    throw new HttpError(400, "invalid_input", "pass only amountIn or amountOut; use maxAmountIn to cap an exact-output swap");
+  }
   const mode: SwapMode = rawMode ? (rawMode as SwapMode) : !has(src.amountIn) && has(src.amountOut) ? "EXACT_OUT" : "EXACT_IN";
   if (mode === "EXACT_OUT") return { mode, amount: parseBaseUnits(src.amountOut, "amountOut") };
   return { mode, amount: parseBaseUnits(src.amountIn, "amountIn") };
@@ -426,11 +432,14 @@ export async function swapView(
   mode: SwapMode = "EXACT_IN",
 ) {
   const owner = typeof body.owner === "string" ? body.owner.trim() : "";
-  if (!owner) throw new HttpError(400, "invalid_input", "owner (wallet address) is required");
+  let validOwner = false;
+  try { validOwner = bs58.decode(owner).length === 32; } catch { /* invalid base58 */ }
+  if (!validOwner) throw new HttpError(400, "invalid_input", "owner must be a base58 Solana address");
+  const bps = body.slippageBps === undefined ? DEFAULT_EXACT_OUT_SLIPPAGE_BPS : parseBaseUnits(body.slippageBps, "slippageBps");
+  if (bps > 10_000n) throw new HttpError(400, "invalid_input", "slippageBps must be between 0 and 10000");
   const quote = await quoteView(id, body.side, mode === "EXACT_OUT" ? minAmountOut : amountIn, mode);
   let maxIn = amountIn;
   if (mode === "EXACT_OUT" && maxIn === 0n) {
-    const bps = body.slippageBps === undefined ? DEFAULT_EXACT_OUT_SLIPPAGE_BPS : parseBaseUnits(body.slippageBps, "slippageBps");
     maxIn = (quote.raw.amountIn * (10_000n + bps) + 9_999n) / 10_000n;
   }
   const chain = await getChain();

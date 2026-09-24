@@ -72,8 +72,9 @@ This injects `DATABASE_URL` (pooled). If the integration names it differently (f
 | `FS_ALLOWLIST_PROGRAM_ID` | deployed `fs_allowlist` program id |
 
 Mark the keypair and token vars as **Sensitive**. The full list with comments is in `.env.example`.
-For mainnet (A29), make a separate set of values (with `SOLANA_CLUSTER=mainnet-beta` once A28 is merged).
-Don't reuse devnet keys.
+Current submission is devnet only: set `SOLANA_CLUSTER=devnet` and
+`NEXT_PUBLIC_SOLANA_CLUSTER=devnet`, with `CHAIN_MODE=devnet` for real devnet transactions.
+Use the mock-USDC mint and devnet keys. Mainnet A29 is deferred.
 
 ### 4. Deploy and verify
 
@@ -104,3 +105,14 @@ claude mcp add fstack -e FS_API_URL=https://<project>.vercel.app/api -e FS_API_T
 
 After you publish, you can switch `plugins/fstack/.mcp.json` to `"command": "npx", "args": ["-y", "fstack-mcp"]`
 (see `docs/agent-install.md`).
+
+## Deployment under a URL prefix
+
+Set `NEXT_PUBLIC_BASE_PATH=/fundraise` at build time. Set `PUBLIC_APP_URL=https://f-stack.ai`
+(or `https://f-stack.ai/fundraise`; both produce the same API-generated market, onboarding and
+signing links). Rebuild after changing the prefix. Set the MCP client's
+`FS_API_URL=https://f-stack.ai/fundraise/api` explicitly.
+
+The MCP request deadline defaults to 120 seconds (`FS_API_TIMEOUT_MS=120000`). It covers both
+response headers and body. Requests are never automatically retried: after a timeout during
+creation or payout, check the existing operation's status before sending another mutation.

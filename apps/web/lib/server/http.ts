@@ -21,7 +21,7 @@ export async function handle(fn: () => Promise<Response>): Promise<Response> {
       return json({ error: err.code, message: err.message, details: err.details }, { status: err.status });
     }
     console.error(err);
-    return json({ error: "internal_error", message: String(err instanceof Error ? err.message : err) }, { status: 500 });
+    return json({ error: "internal_error", message: "An unexpected server error occurred" }, { status: 500 });
   }
 }
 
@@ -36,7 +36,14 @@ export async function readJson(req: Request): Promise<Record<string, unknown>> {
 }
 
 export function appUrl(): string {
-  return (process.env.PUBLIC_APP_URL || "http://localhost:3000").replace(/\/+$/, "");
+  const url = new URL(process.env.PUBLIC_APP_URL || "http://localhost:3000");
+  const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/+$/, "");
+  const path = url.pathname.replace(/\/+$/, "");
+  // PUBLIC_APP_URL may already include the deployment prefix.
+  url.pathname = basePath && !path.endsWith(basePath) ? `${path}${basePath}` : path;
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/+$/, "");
 }
 
 export function parseBaseUnits(v: unknown, field: string): bigint {

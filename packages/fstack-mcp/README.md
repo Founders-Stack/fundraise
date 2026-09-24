@@ -35,6 +35,7 @@ The server speaks MCP over stdio; it prints nothing else to stdout.
 | Env | Default | Purpose |
 |---|---|---|
 | `FS_API_URL` | `http://localhost:3000/api` | Base URL of the Founder Stack API |
+| `FS_API_TIMEOUT_MS` | `120000` | Timeout in milliseconds, including response body reading; no automatic retries |
 | `FS_API_TOKEN` | — | Sent as `Authorization: Bearer <token>`; identifies the issuer principal |
 
 ## Tools
@@ -99,3 +100,5 @@ env = { FS_API_URL = "http://localhost:3000/api", FS_API_TOKEN = "..." }
 
 Per-invocation alternative (no config edit): see `docs/agent-install.md`. Both agents are smoke-tested by
 `scripts/agent-smoke/run.sh`.
+
+A timeout does not prove a mutation failed: the server may still finish it. Read issuance or distribution status before retrying. For a deployment under `/fundraise`, set `FS_API_URL=https://f-stack.ai/fundraise/api`.

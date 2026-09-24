@@ -274,7 +274,7 @@ describe("market", () => {
     const needed = BigInt(q.pay.baseUnits);
     expect(needed).toBeGreaterThan(100_000_000_000n); // ~$1/token plus fees
 
-    const swap = await swapPOST(post({ owner: "Buyer1111111111111111111111111111111111111", side: "BUY", amountOut: "100000000000" }, {}), ctx(issuanceId));
+    const swap = await swapPOST(post({ owner: bs58.encode(nacl.sign.keyPair().publicKey), side: "BUY", amountOut: "100000000000" }, {}), ctx(issuanceId));
     const body = await swap.json();
     expect(swap.status).toBe(200);
     expect(body.mode).toBe("EXACT_OUT");

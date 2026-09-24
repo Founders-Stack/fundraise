@@ -1,7 +1,7 @@
 # Founder Stack `/capital`: Cash Flow Rights (Stocklana build spec)
 
 **Deadline:** Sep 25, 2026, 4:00pm ET. **Target:** Main track + Meteora DBC bounty.
-**Network:** the submitted build runs on **Solana mainnet** as a closed pilot with real USDC (section 14). Devnet is for development, CI and rehearsal only.
+**Network (updated 2026-09-25): devnet only** for testing, demo video and submission, using mock USDC. Mainnet deployment, real funds and H13 are deferred (section 14).
 **Not targeting:** Clawpump (requires stock-paired pool via clawpump), PreStocks / Tessera (partner tokens only), Pyth.
 
 > Founder Stack lets cash-generating businesses raise against a share of their future distributable cash flow, **straight from Claude Code or Codex** (`/fstack:fundraise`): an agreement defines the claim, a Token-2022 token with an allowlist hook represents participation units, Meteora DBC provides distribution, price discovery and liquidity, and every reporting period current holders are paid in USDC.
@@ -37,7 +37,7 @@ Founder (Claude Code / Codex)                      Investor (browser)
                                                        meteora, distribution,
                                                        monetization
                                                             │
-                                               Solana mainnet (final) / devnet (dev):
+                                               Solana devnet (demo and submission):
                                                Token-2022 + fs_allowlist hook
                                                + Meteora DBC + USDC (mock on devnet)
 ```
@@ -92,7 +92,7 @@ Thin, typed (zod), one-to-one with API routes. Auth is `FS_API_TOKEN` (bearer) a
 
 ### 0.4 Signing (decision)
 
-- **P0 (team custody, closed mainnet pilot):** the API holds the issuer and Founder Stack authority keypairs as deployment secrets (never in the repo) and signs server-side. The demo issuer (Acme) is team-controlled, so no third party's funds sit in these keys. Hot-wallet balances are capped (section 14). The UI and skills label this "Team custody (closed pilot)". On devnet the same code runs with throwaway keys.
+- **P0 (team custody, devnet demo):** the API holds the issuer and Founder Stack authority keypairs as deployment secrets (never in the repo) and signs server-side. The demo issuer (Acme) is team-controlled, so no third party's funds sit in these keys. Only devnet SOL and mock USDC are used (section 14). The UI and skills use the devnet custody label and throwaway keys.
 - **P1 (production path):** mutating tools return a `signUrl` (`/sign/[requestId]`). The founder opens it and signs with their wallet, the same "open this URL in your own browser" pattern as the OAuth step in `founder-stack-onboarding`. Required before any issuer other than the team uses the product.
 
 ---
@@ -107,7 +107,7 @@ Thin, typed (zod), one-to-one with API routes. Auth is `FS_API_TOKEN` (bearer) a
 | Token-2022 allowlist transfer hook | Graduation to DAMM v2 (see H5) | SOFTWARE/REGULATED runtime modes |
 | DBC pool whose curve is derived from cash-flow inputs | Price chart | Real KYC, e-sign, jurisdictions |
 | Buy/sell with USDC (mock USDC on devnet) | Hash of issuer report committed on-chain (memo) | Accounting / bank integrations |
-| **Mainnet closed pilot** with real USDC at demo scale (section 14) | Embedded wallets / email login for investors | Standalone indexer service |
+| **Devnet demo** with mock USDC at `DEMO_SCALE=1` (section 14) | Embedded wallets / email login for investors | Standalone indexer service |
 | One-signature investor onboarding + agreement hash (section 6) | | Automatic scheduled distributions |
 | Live holder registry from chain | | Fiat on/off-ramp |
 | Periodic distribution: report → snapshot → allocations → USDC transfers | | Other chains, L2s, bridges |
@@ -316,7 +316,7 @@ The first draft asked for more than it could check. Requirements that proved not
 - The hook enforces eligibility on-chain before graduation. Carol's failed buy stays in the demo.
 - Every accepted agreement has a stored wallet signature over its hash.
 - Money-moving and chain-writing tools still require `previewId` / `confirmTotal` server-side (section 0.3).
-- Mainnet onboarding requires the invite code (section 14).
+- Devnet demo onboarding requires the invite code (section 14).
 
 ---
 
@@ -372,15 +372,15 @@ Issuer actions (launch, report, distribute) happen in the agent (section 0). The
 
 ### 9.1 Landing page (last deliverable)
 
-A single page at `/`, built **last** (hours 48–52, in parallel with the final video) so it can link the recorded video and the mainnet sigs. It sits above the existing issuances list and changes no other route, so it can't break the demo. Timebox 3h. If it slips, the current `/` ships as is.
+A single page at `/`, built **last** (hours 48–52, in parallel with the final video) so it can link the recorded video and the devnet sigs. It sits above the existing issuances list and changes no other route, so it can't break the demo. Timebox 3h. If it slips, the current `/` ships as is.
 
 Sections, top to bottom:
-1. **Hero:** "Raise against your cash flow, from your coding agent." Subline: equity-free capital, USDC distributions every period, on Solana. Two CTAs: "Install for Claude Code / Codex" (copyable snippet) and "See the live mainnet pilot" (market page).
+1. **Hero:** "Raise against your cash flow, from your coding agent." Subline: equity-free capital, USDC distributions every period, on Solana. Two CTAs: "Install for Claude Code / Codex" (copyable snippet) and "See the live devnet demo" (market page).
 2. **How it works,** 3 steps: launch from the agent → invited investors onboard with one signature and buy on a Meteora DBC curve priced from yield → every period, current holders are paid in USDC.
 3. **For founders / for investors,** two short columns: what each side does and gives up (links section 13.1 wording).
 4. **Live proof,** read from the public API: cluster, `fs_allowlist` program ID, pool address, last distribution with explorer links, the video.
 5. **Why Solana + Meteora:** Token-2022 hook, yield-priced DBC curve, locked issuer LP.
-6. **Honest framing:** "Closed mainnet pilot. Not an offer of securities." Distributions are based on issuer-reported cash flow, and yield is informational. The copy passes the `lintCopy` forbidden-terms check (section 13).
+6. **Honest framing:** "Devnet prototype, no monetary value." Distributions are based on issuer-reported cash flow, and yield is informational. The copy passes the `lintCopy` forbidden-terms check (section 13).
 7. **Footer:** repo, video, hackathon link.
 
 No new API routes, no auth, and the page works on mobile.
@@ -391,31 +391,22 @@ No new API routes, no auth, and the page works on mobile.
 
 Company: **Acme SaaS**, a demo issuer controlled by the team. Terms: 10% of quarterly DCF.
 
-**Recorded on mainnet at pilot scale.** Real USDC comes out of the team's pocket, so supply and DCF are 1/1000 of the pitch example. Per-token prices, per-token payouts and yields are identical, so the pitch numbers and the on-chain numbers tell the same story:
-
-| | Pitch example (landing page, pitch) | Mainnet pilot (video, on-chain) |
-|---|---|---|
-| Supply | 1,000,000 ACME-CF | 1,000 ACME-CF |
-| Expected DCF | $1.6M / yr | $1,600 / yr |
-| Start price (16% target yield) | $1.00 | $1.00 |
-| Alice buys | 100,000 (~$100k + price impact) | 100 (~$100 + price impact) |
-| Q3: DCF → pool → per token | $400k → $40k → $0.04 | $400 → $40 → $0.04 |
-| Alice's Q3 payout | $4,000 | $4.00 |
-| Q4: DCF → pool → per token | $450k → $45k → $0.045 | $450 → $45 → $0.045 |
-| Q4 payouts, Alice (60%) / Bob (40%) | $2,700 / $1,800 | $2.70 / $1.80 |
-
-The video shows the pilot numbers. The narration and landing page may quote the pitch example, labeled "illustrative". The devnet rehearsal (A20) runs the pitch example with mock USDC.
+**Recorded on devnet with mock USDC (`DEMO_SCALE=1`).** Demo tokens have no monetary value.
+Use 1,000,000 ACME-CF, expected annual DCF $1.6M and an illustrative $1.00 start price.
+Alice buys 100,000 units. Q3 DCF $400,000 produces a $40,000 rights pool and a 4,000 mock-USDC
+payout to Alice. After Alice sells 40,000 and Bob buys 40,000, Q4 DCF $450,000 produces a
+$45,000 pool: Alice receives 2,700 and Bob 1,800 mock USDC.
 
 Split screen: **terminal (founder) | browser (investors)**.
 
-1. **Launch, in Claude Code.** The founder types `/fstack:fundraise` "we're Acme SaaS, raise against 10% of quarterly cash flow". The skill asks only for expected DCF and shows defaults for the rest. The preview shows expected DCF $1,600/yr and 16% target yield → $1.00/token, what the business gives up (10% of DCF, section 13.1), 48/2/50, 50/50 and the agreement hash. The founder says "yes" and gets back the market URL + investor invite link. The skill always stops after the preview, and a "yes" given before the preview doesn't count, so this step always takes two turns.
+1. **Launch, in Claude Code.** The founder types `/fstack:fundraise` "we're Acme SaaS, raise against 10% of quarterly cash flow". The skill asks only for expected DCF and shows defaults for the rest. The preview shows expected DCF $1,600,000/yr and 16% target yield → $1.00/token, what the business gives up (10% of DCF, section 13.1), 48/2/50, 50/50 and the agreement hash. The founder says "yes" and gets back the market URL + investor invite link. The skill always stops after the preview, and a "yes" given before the preview doesn't count, so this step always takes two turns.
 2. **Hook moment, in the browser.** Carol (not onboarded) tries to buy and the transaction fails with `NotEligible`.
-3. **Buy, in the browser.** Alice opens the invite link, checks one box, signs once, and buys 100 ACME-CF.
-4. **Q3, in Codex** (same skills, second agent, ~10s). The founder runs `/fstack:fundraise` "Q3 closed, numbers are in ./finance/q3.csv". The agent reads the CSV and proposes $400 DCF with its working shown. The founder confirms, and `fundraise-distribute` previews a $40 pool, $0.04/token, Alice $4.00, the rest unallocated. The founder types the total and the mainnet signatures print.
-5. **Trade, in the browser.** Bob onboards. Alice sells 40 into the pool and Bob buys 40. The holders table goes live: Alice 60, Bob 40.
-6. **Q4, in Claude Code.** $450 gives a $45 pool: Alice $2.70, Bob $1.80. **"The units Alice sold now pay Bob."**
-7. **Market page.** History shows 2 periods, annualized distribution / token and trailing yield vs price, with Solana Explorer links on mainnet. `/fstack:fundraise` status in the terminal shows the same numbers.
-8. **Close.** "This ran on mainnet with real USDC." Then: wallet-signing links (P1), escrowed distributions (P1), Stripe-verified revenue (section 16), SOFTWARE mode as a one-config switch, `fundraise-venture` next, legal framing (section 13).
+3. **Buy, in the browser.** Alice opens the invite link, checks one box, signs once, and buys 100,000 ACME-CF.
+4. **Q3, in Codex** (same skills, second agent, ~10s). The founder runs `/fstack:fundraise` "Q3 closed, numbers are in ./finance/q3.csv". The agent reads the CSV and proposes $400,000 DCF with its working shown. The founder confirms, and `fundraise-distribute` previews a $40,000 pool, $0.04/token, Alice 4,000 mock USDC, the rest unallocated. The founder types the total and the devnet signatures print.
+5. **Trade, in the browser.** Bob onboards. Alice sells 40,000 into the pool and Bob buys 40,000. The holders table goes live: Alice 60,000, Bob 40,000.
+6. **Q4, in Claude Code.** $450,000 gives a $45,000 pool: Alice 2,700, Bob 1,800 mock USDC. **"The units Alice sold now pay Bob."**
+7. **Market page.** History shows 2 periods, annualized distribution / token and trailing yield vs price, with Solana Explorer links on devnet. `/fstack:fundraise` status in the terminal shows the same numbers.
+8. **Close.** "This ran on devnet with mock USDC; tokens have no monetary value." Then: wallet-signing links (P1), escrowed distributions (P1), Stripe-verified revenue (section 16), SOFTWARE mode as a one-config switch, `fundraise-venture` next, legal framing (section 13).
 
 ---
 
@@ -449,21 +440,21 @@ Re-checked 2026-09-23 against the SDK `MeteoraAg/dynamic-bonding-curve-sdk` @ `0
 
 | # | Hypothesis | Test | Pass | Timebox | Fallback |
 |---|---|---|---|---|---|
-| H1 | The deployed DBC program on **devnet and mainnet** has the transfer-hook instructions (≥ 0.2.0) | Devnet: SDK hook flow with a no-op hook (config + pool + one swap). Mainnet: `createConfigWithTransferHook` alone, which is cheap and needs no pool | Both confirm | 2h (+30m mainnet) | Plain Token-2022 via `createConfig`. Eligibility enforced at snapshot (R4). Demo beat 2 becomes the "unregistered holder → unallocated" warning |
+| H1 | The deployed DBC program on **devnet** has transfer-hook instructions (≥ 0.2.0) | SDK hook flow with a no-op hook (config + pool + one swap) | Confirms on devnet | 2h | Plain Token-2022; eligibility enforced at snapshot (R4) |
 | H2 | Allowlist hook resolves `AllowEntry` from destination account data; pool authority allowlisted | Allowlisted buy ✅, non-allowlisted ❌, sell into pool ✅ | All three behave as expected | 4h | H1 fallback |
 | H3 | Plain SPL quote mint accepted without a token badge | Closed by source (V10). Confirm in passing: the H1 config tx succeeds with no `tokenBadge` | Tx succeeds | 0 (during H1) | Devnet USDC `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` + Circle faucet |
 | H4 | Pool reads return correct quote reserve, threshold, progress and accrued fees | Compare the V13 reads with the swaps performed | Values match | 1h | Compute progress client-side |
 | H5 | A transfer-hook pool can migrate to DAMM v2 | Tiny-threshold pool, fill, `migrateToDammV2` | DAMM v2 pool trades | 1h, **P1 only, devnet only** | Now **likely supported**: DBC revokes the hook when the curve completes, before migration (V8). The trade-off is that the allowlist ends at graduation. Show the projected split; don't block |
-| H6 | Holder listing by mint works on our RPC, **mainnet included** | Devnet: `getProgramAccounts` + mint memcmp. Mainnet: provider's by-mint query (e.g. Helius DAS `getTokenAccounts`) | < 2s | 30m | `getTokenLargestAccounts` (top 20 holders, enough for the pilot) |
+| H6 | Holder listing by mint works on the devnet RPC | Token-2022 mint query or allowlist + ATA fallback | < 2s | 30m | `getTokenLargestAccounts` (top 20 holders, demo limitation) |
 | H7 | Snapshot → allocations → batched transfers, run twice with a trade in between | 2 periods, 2 holders | Q4 split 60/40 as expected | 2h | Single-transfer loop |
 | H8 | `buildCurveWithMarketCap` hits the derived starting price within ±2% | Create pool from the $1.0M / $3.0M inputs (pilot: $1k / $3k with 1,000 supply), quote a tiny buy | Price ≈ $1.00 | 1h | Use `buildCurveWithCustomSqrtPrices` with explicit start price |
 | H9 | One `SKILL.md` set + one MCP server works unchanged in **both** Claude Code (plugin `/fstack:fundraise`) and Codex (`.agents/skills` + `[mcp_servers.fstack]` in `config.toml`) | Hello-world skill calling `fundraise_list_issuances` in each agent | Both list issuances | 1h | Codex-specific copies of the SKILL.md (same tools). If Codex fails entirely, demo Claude Code only and mention Codex as roadmap |
 | H10 | On-chain tools finish inside MCP client timeouts (create issuance = several txs) | `fundraise_create_issuance` on devnet from Claude Code | < 60s, no client timeout | 1h | Make create async: return a `jobId` and poll it with `fundraise_get_market` |
 | H11 | The agent reliably proposes DCF from a messy CSV and the founder can verify it | 3 sample exports (Stripe-like, bank-like, P&L) | Correct DCF with working shown in 3/3 | 1h | The skill asks for the number directly and just displays the file |
 | H12 | `fs_allowlist.initialize` can't be front-run | Gate `initialize` to the FS authority and bundle it into the pool-creation tx. Test: a non-authority `initialize` fails; pool creation + `initialize` land atomically | Both hold | 1h, **before any mainnet deploy** | Deploy only the gated version. There is no mainnet fallback for this one |
-| H13 | The whole loop runs on **mainnet** at pilot scale (section 10) | Deploy `fs_allowlist`, create the Acme pool with real USDC, then Carol ❌, Alice ✅, Q3, trade, Q4 | All sigs visible on Solana Explorer; payouts 4.00 / 2.70 / 1.80 USDC | 4h | Record the video on devnet, link whatever mainnet steps passed as proof, and state plainly in the submission which steps ran on mainnet |
+| H13 | Mainnet full loop | Deferred by the 2026-09-25 devnet-only decision | Not required for submission | — | — |
 
-**Checkpoint:** H1–H3 decided by **hour 6** (the mainnet half of H1 too, since it costs minutes). If H1 or H2 fails, take the fallback immediately. H12 must pass before hour 40. H13 is decided by hour 44.
+**Checkpoint:** H1–H3 decided by hour 6. Keep H12 initialization protection. H13 is deferred; verify the full devnet loop before recording.
 
 ### Product hypotheses (pitch, not build)
 
@@ -479,16 +470,16 @@ Re-checked 2026-09-23 against the SDK `MeteoraAg/dynamic-bonding-curve-sdk` @ `0
 
 | Hours | Deliverable | Exit criteria |
 |---|---|---|
-| 0–6 | Scaffold (Next.js, Prisma, wallet adapter, MCP package, plugin skeleton), `lib/cluster`. Mock USDC + faucet. H1 (devnet + mainnet config check), H3, H9 spikes. Start `fs_allowlist` | H1/H3/H9 decided |
+| 0–6 | Scaffold (Next.js, Prisma, wallet adapter, MCP package, plugin skeleton), `lib/cluster`. Mock USDC + faucet. H1 (devnet), H3, H9 spikes. Start `fs_allowlist` | H1/H3/H9 decided |
 | 6–14 | Hook done (H2). `buildConfig` with yield derivation (H8). Issuance API (`preview`/`create`) + MCP tools + `fundraise-launch` skill (3 questions + defaults) | Pool created **from Claude Code** at ~$1.00 (H10) |
 | 14–22 | `/market/[id]`: buy/sell + preview, progress, economics panel (H4). `fundraise` router/status skill | Swap from UI; status in the terminal matches |
 | 22–28 | One-signature onboarding (`/onboard/[id]` + inline gate on the market page), invite code, allowlist, live holders (H6). `fundraise-investors` | Carol ❌ / Alice ✅, Alice onboarded in < 30s |
 | 28–36 | Distribution API (H7) + `fundraise-report` (H11) + `fundraise-distribute`, yield block, history | Two-period flow works from the agent (devnet) |
 | **36** | **Submit a draft** (repo + rough devnet video). Edits are allowed until the deadline | Submitted |
 | 36–40 | Polish, monetization unit test, README. `initialize` gating (H12). Deploy the web app with Postgres | Live URL (devnet); H12 green |
-| 40–44 | **Mainnet cutover:** deploy `fs_allowlist`, switch `SOLANA_CLUSTER`, fund capped hot wallets, run the pilot loop once (H13) | Mainnet sigs for every demo step |
-| 44–50 | Final video **on mainnet**. P1 if green: escrow + claim first, then report-hash memo, then H5 (devnet) | Video uploaded |
-| 48–52 | **Landing page** (section 9.1), in parallel with the video; links the video and mainnet sigs | Landing page live |
+| 40–44 | Verify the full devnet loop with mock USDC; capture addresses and signatures | Devnet evidence for every demo step |
+| 44–50 | Final video **on devnet with mock USDC**. P1 if green: escrow + claim first, then report-hash memo, then H5 (devnet) | Video uploaded |
+| 48–52 | **Landing page** (section 9.1), in parallel with the video; links the video and devnet sigs | Landing page live |
 | 52–55 | Buffer + final submission | Submitted |
 
 ---
@@ -502,7 +493,7 @@ Use:
 - "Meteora DBC provides distribution, price discovery and liquidity."
 - "Protocol economics shown are illustrative. The production model is software fees (one config switch)."
 - "Equity-free capital: no shares, no cap-table change, no board seat. The business pays for it with a share of distributable cash flow."
-- "Closed mainnet pilot with real USDC. Not an offer of securities."
+- "Devnet prototype with mock USDC, no monetary value."
 
 Don't say: dividends, shares, equity (as a description of what holders get; "equity-free" is fine), "token = legal right", "market cap = company valuation", "guaranteed yield", a bare "non-dilutive", "free capital", or that the 2% fee is a production-compliant model.
 
@@ -520,29 +511,22 @@ Don't say: dividends, shares, equity (as a description of what holders get; "equ
 
 ---
 
-## 14. Decision: the final build runs on mainnet
+## 14. Decision: devnet-only submission
 
-**Decided 2026-09-23.** The submitted build runs on **Solana mainnet** as a closed pilot with real USDC. Devnet stays for development, CI and the rehearsal run (A20). Reasons: Meteora scores "working code on mainnet" above slides, and a live pool paying real USDC distributions is the strongest answer to "could this be a real app?".
+**Decided 2026-09-25; supersedes the 2026-09-23 mainnet decision.** Testing, the recorded demo
+and the submitted live build use Solana devnet with faucet mock USDC. A29, U12 and H13 are
+deferred, not submission blockers. Mainnet references in technical comparisons and verified facts
+are reference material, not instructions to deploy or fund mainnet.
 
-| | Devnet (dev, rehearsal) | Mainnet (final) |
-|---|---|---|
-| Quote mint | Mock USDC (SPL, faucet) | USDC `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` (SPL, no badge, V10) |
-| DBC program | `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN` | Same ID (V11); hook support confirmed by H1 |
-| `fs_allowlist` | Devnet deploy | Mainnet deploy of the **gated** build only (H12). Budget ≈ 2–4 SOL of program rent (estimate from typical Anchor program size), recoverable by closing the program afterwards |
-| Scale | Pitch example (1,000,000 supply) | Pilot (1,000 supply, section 10) |
-| RPC | Any | Paid mainnet RPC with an indexed by-mint token query (H6) |
-| Keys | Throwaway | Deployment secrets, capped hot wallets |
-| DB | SQLite | Postgres |
-| Banner / agreement copy | "Devnet prototype, no monetary value" | "Closed mainnet pilot. Not an offer of securities. Participants are the team and invited testers." |
-
-**Guardrails (all required):**
-- **Closed allowlist.** `add_allow` runs only for a valid `inviteCode` (section 6), and invite links go only to the team and named testers. The pool is not promoted. It may still appear on Meteora or aggregators, but any non-allowlisted buy fails at the hook.
-- **No graduation in the pilot.** Graduation revokes the hook for good (V8) and would open trading to anyone. The pilot's `migrationQuoteThreshold` sits far above what the invited wallets will buy.
-- **Capped hot wallets.** The issuer wallet holds ≤ $200 USDC (buys are made from the investor wallets; payouts are $8.50 in total). The FS authority holds ≤ 1 SOL after deploy.
-- **Kill switch.** `remove_allow` on every participant blocks new buys and wallet-to-wallet transfers. Sells into the pool still work (the pool authority stays allowlisted), so nobody is trapped.
-- **Copy.** All cluster-specific wording comes from `lib/cluster`, so no "devnet" string ships on mainnet and no "mainnet" claim appears on devnet.
-- **Honesty about capital.** The issuer receives capital at graduation (48% of the migration threshold, section 5). The pilot never graduates, so the pitch says the pilot proves the loop (launch, hook, trade, two distributions), not that Acme raised money.
-- **Fallback (H13).** If the mainnet loop isn't green by hour 44, record on devnet and state plainly which steps ran on mainnet.
+- Set `SOLANA_CLUSTER=devnet`, `NEXT_PUBLIC_SOLANA_CLUSTER=devnet` and `CHAIN_MODE=devnet`
+  for the live demo. `CHAIN_MODE=fake` remains for local automated tests only.
+- Use devnet SOL, the SPL mock-USDC mint and throwaway devnet keys. No real funds required.
+- Use Postgres for the hosted app; SQLite remains for local development.
+- Keep the gated allowlist initialization, invite checks and explicit agent confirmations.
+- Record with `DEMO_SCALE=1`: 1,000,000 units; payouts 4,000 / 2,700 / 1,800 mock USDC.
+- Publish devnet program/pool/mint addresses and actual signatures with devnet Explorer links.
+- Label the app and video "Devnet prototype, no monetary value". Do not claim real capital raised.
+- Mainnet runbook retained in `docs/mainnet-pilot.md` for later, outside the current plan.
 
 ---
 
