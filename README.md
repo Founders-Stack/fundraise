@@ -114,6 +114,7 @@ against `CHAIN_MODE=fake`).
 
 ```bash
 export FS_API_URL=http://localhost:3000/api FS_API_TOKEN=dev-local-token
+# or the hosted devnet app: FS_API_URL=https://f-stack.ai/fundraise/api (web: https://f-stack.ai/fundraise)
 claude --plugin-dir ./plugins/fstack      # Claude Code
 > /fstack:fundraise
 ```

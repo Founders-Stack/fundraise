@@ -14,7 +14,7 @@ cd apps/web && pnpm dev                     # API on http://localhost:3000/api
 
 | Env | Default | Notes |
 |---|---|---|
-| `FS_API_URL` | `http://localhost:3000/api` | Base URL of the Founder Stack API (include `/api`) |
+| `FS_API_URL` | `http://localhost:3000/api` | Base URL of the Founder Stack API (include `/api`). Hosted devnet: `https://f-stack.ai/fundraise/api` |
 | `FS_API_TOKEN` | none | Bearer token. Must equal the API's `FS_API_TOKEN` (local dev: `dev-local-token`) |
 
 ## Claude Code
