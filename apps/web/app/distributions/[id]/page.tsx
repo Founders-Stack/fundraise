@@ -65,7 +65,7 @@ export default async function DistributionPage({ params }: PageProps<"/distribut
         <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-5">
           <Stat label="Reported DCF" value={usd(dist.dcf.baseUnits)} note="issuer-reported" />
           <Stat label={`Rights pool (${dist.poolPercentage})`} value={usd(dist.rightsPool.baseUnits)} note="DCF × rights %" />
-          <Stat label="Per unit" value={usd(dist.perToken.baseUnits)} note={`÷ ${d.snapshot?.tokenSupply.display ?? d.issuance.tokenSupply.toString()} units`} positive />
+          <Stat label="Per unit" value={usd(dist.perToken.baseUnits)} note={`÷ ${d.snapshot?.tokenSupply.display ?? BigInt(d.issuance.tokenSupply).toLocaleString("en-US")} units`} positive />
           <Stat label={executed ? "Paid to holders" : "To holders"} value={dist.totalAllocated ? usd(dist.totalAllocated.baseUnits) : "—"} note={d.totals ? `${d.totals.payees} wallet${d.totals.payees === 1 ? "" : "s"}` : "after snapshot"} />
           <Stat label="Unallocated" value={dist.unallocated ? usd(dist.unallocated.baseUnits) : "—"} note="retained by issuer" />
         </dl>
