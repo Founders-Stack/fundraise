@@ -26,7 +26,7 @@ afterEach(() => {
 describe("wallet signing: issuance create", () => {
   it("returns a sign URL, creates nothing until the founder signs, then goes LIVE", async () => {
     const p = await preview({ ...ACME, symbol: "SIGN1" });
-    const c = await call(createPOST, post({ previewId: p.body.previewId, signingMode: "wallet" }));
+    const c = await call(createPOST, post({ previewId: p.body.previewId, signingMode: "wallet", payoutMode: "direct" }));
     expect(c.status, JSON.stringify(c.body)).toBe(202);
     expect(c.body.status).toBe("AWAITING_SIGNATURE");
     expect(c.body.signUrl).toBe(`http://localhost:3000/sign/${c.body.signRequestId}`);
@@ -109,14 +109,14 @@ describe("wallet signing: distribution execute", () => {
     const total: string = snap.body.totals.totalAllocated.usdc;
 
     // mismatch still rejected in wallet mode
-    expect((await call(executePOST, post({ confirmTotal: "1", signingMode: "wallet" }), id)).body.error).toBe("confirm_total_mismatch");
+    expect((await call(executePOST, post({ confirmTotal: "1", signingMode: "wallet", payoutMode: "direct" }), id)).body.error).toBe("confirm_total_mismatch");
 
-    const e = await call(executePOST, post({ confirmTotal: total, signingMode: "wallet" }), id);
+    const e = await call(executePOST, post({ confirmTotal: total, signingMode: "wallet", payoutMode: "direct" }), id);
     expect(e.status, JSON.stringify(e.body)).toBe(200);
     expect(e.body.status).toBe("AWAITING_SIGNATURE");
     expect(e.body.holders).toBe(7);
     // asking again reuses the same open request
-    const again = await call(executePOST, post({ confirmTotal: total, signingMode: "wallet" }), id);
+    const again = await call(executePOST, post({ confirmTotal: total, signingMode: "wallet", payoutMode: "direct" }), id);
     expect(again.body.signRequestId).toBe(e.body.signRequestId);
 
     const me = founder();
@@ -132,7 +132,7 @@ describe("wallet signing: distribution execute", () => {
     holders.forEach((w, i) => expect(fake.control.usdcBalance(w)).toBeGreaterThan(before[i]));
 
     // custody execute afterwards is a no-op
-    const after = await call(executePOST, post({ confirmTotal: total }), id);
+    const after = await call(executePOST, post({ confirmTotal: total, payoutMode: "direct" }), id);
     expect(after.body.alreadyExecuted).toBe(true);
   });
 });

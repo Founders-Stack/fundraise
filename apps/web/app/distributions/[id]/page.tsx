@@ -9,6 +9,7 @@ import { getPublicDistribution } from "@/lib/server/distribution";
 import { AddrLink, TxLink } from "@/components/explorer-link";
 import { fmtDate, usd } from "@/components/format";
 import { StatusTag } from "@/components/fs";
+import { ClaimPanel } from "@/components/investor/claim-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,7 @@ export default async function DistributionPage({ params }: PageProps<"/distribut
   const dist = d.distribution;
   const fake = d.chainMode === "fake";
   const executed = dist.status === "EXECUTED";
+  const claims = d.claims;
 
   return (
     <div className="space-y-8">
@@ -47,7 +49,7 @@ export default async function DistributionPage({ params }: PageProps<"/distribut
           <div className="space-y-1">
             <div className="flex items-center gap-3">
               <h1 className="text-[27px] leading-tight font-semibold">{dist.periodLabel} distribution</h1>
-              <StatusBadge status={dist.status} />
+              <StatusBadge status={dist.status} escrow={Boolean(claims)} />
             </div>
             <p className="text-sm text-muted-foreground">
               {d.issuance.issuerName} · {d.issuance.poolPercentage} of {d.issuance.distributionFrequency === "MONTHLY" ? "monthly" : "quarterly"}{" "}
@@ -106,7 +108,7 @@ export default async function DistributionPage({ params }: PageProps<"/distribut
                         <td className="num text-right">{r.tokens.display}</td>
                         <td className="num text-right text-muted-foreground">{r.pctOfSupply}</td>
                         <td className="num text-right font-medium">{usd(r.payout.baseUnits)}</td>
-                        <td className="text-right">{r.txSignature ? <TxLink sig={r.txSignature} /> : <span className="text-xs text-muted-foreground">{executed ? "—" : "pending"}</span>}</td>
+                        <td className="text-right">{r.txSignature ? <TxLink sig={r.txSignature} /> : <span className="text-xs text-muted-foreground">{claims ? "unclaimed" : executed ? "—" : "pending"}</span>}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -117,7 +119,7 @@ export default async function DistributionPage({ params }: PageProps<"/distribut
                         <td />
                         <td />
                         <td className="num text-right font-semibold">{usd(d.totals.totalAllocated.baseUnits)}</td>
-                        <td className="text-right text-xs text-muted-foreground">{d.totals.paid}/{d.rows.length} paid</td>
+                        <td className="text-right text-xs text-muted-foreground">{d.totals.paid}/{d.rows.length} {claims ? "claimed" : "paid"}</td>
                       </tr>
                     </tfoot>
                   )}
@@ -186,12 +188,41 @@ export default async function DistributionPage({ params }: PageProps<"/distribut
                 ))}
               </ul>
             )}
-            <p className="text-xs text-muted-foreground">USDC transfers from the issuer&apos;s wallet, up to 10 holders per transaction.</p>
+            <p className="text-xs text-muted-foreground">
+              {claims
+                ? "Each claim is a USDC transfer from the claim escrow to one holder."
+                : "USDC transfers from the issuer\u2019s wallet, up to 10 holders per transaction."}
+            </p>
           </section>
         </div>
 
         {/* ---------------------------------------------------------- side */}
         <aside className="space-y-6 lg:sticky lg:top-20">
+          {claims && (
+            <>
+              {claims.unclaimedCount > 0 && <ClaimPanel distributionId={dist.id} chainMode={d.chainMode} />}
+              <section className="space-y-3 rounded-xl border bg-card p-4">
+                <h2 className="text-[15px] font-semibold">Claim escrow</h2>
+                <dl className="space-y-3 text-sm">
+                  <Field label="Escrow wallet">{claims.escrowAddress ? <AddrLink addr={claims.escrowAddress} fake={fake} /> : "—"}</Field>
+                  <Field label="Funding transfer">{claims.fundSignature ? <TxLink sig={claims.fundSignature} /> : "—"}</Field>
+                  <Field label="Claimed">
+                    <span className="num">{usd(claims.claimed.baseUnits)} · {claims.claimedCount} wallet{claims.claimedCount === 1 ? "" : "s"}</span>
+                  </Field>
+                  <Field label="Unclaimed (held in escrow)">
+                    <span className="num">{usd(claims.unclaimed.baseUnits)} · {claims.unclaimedCount} wallet{claims.unclaimedCount === 1 ? "" : "s"}</span>
+                  </Field>
+                  <Field label="Merkle root (sha256)">
+                    <span className="break-all font-mono text-[11px] leading-relaxed">{claims.merkleRoot}</span>
+                  </Field>
+                </dl>
+                <p className="text-xs text-muted-foreground">
+                  The issuer funded the whole payout table up front. Each claim is checked against this root, so the escrow can only pay
+                  the snapshot amount to the snapshot wallet.
+                </p>
+              </section>
+            </>
+          )}
           <section className="space-y-3 rounded-xl border bg-card p-4">
             <h2 className="text-[15px] font-semibold">Report</h2>
             <dl className="space-y-3 text-sm">
@@ -236,7 +267,8 @@ export default async function DistributionPage({ params }: PageProps<"/distribut
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, escrow }: { status: string; escrow?: boolean }) {
+  if (status === "EXECUTED" && escrow) return <StatusTag tone="positive" dot>Funded · claims open</StatusTag>;
   if (status === "EXECUTED") return <StatusTag tone="positive" dot>Paid</StatusTag>;
   if (status === "SNAPSHOTTED") return <StatusTag tone="warning" dot>Snapshot taken</StatusTag>;
   return <StatusTag dot>Reported</StatusTag>;

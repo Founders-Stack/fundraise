@@ -14,7 +14,7 @@ const payout = fake.ports.payout;
 
 const report = (issuanceId: string, body: unknown) => call(reportPOST, post(body), issuanceId);
 const snapshot = (id: string) => call(snapshotPOST, post(undefined), id);
-const execute = (id: string, confirmTotal?: string) => call(executePOST, post(confirmTotal === undefined ? {} : { confirmTotal }), id);
+const execute = (id: string, confirmTotal?: string) => call(executePOST, post(confirmTotal === undefined ? { payoutMode: "direct" } : { confirmTotal, payoutMode: "direct" }), id);
 const history = (issuanceId: string) => call(historyGET, get(), issuanceId);
 
 beforeAll(() => {

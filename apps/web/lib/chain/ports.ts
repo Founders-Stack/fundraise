@@ -118,6 +118,20 @@ export interface PayoutPort {
 }
 
 /**
+ * Claim escrow for distributions (SPEC section 7, P1): a server-held USDC token account. The issuer
+ * funds it with one transfer (payout.transferBatch or a wallet-signed transfer to `address()`), and
+ * each holder's claim is released from it after the API verifies their Merkle proof. Per-distribution
+ * accounting lives in the database; this port only moves USDC out of the escrow wallet.
+ */
+export interface EscrowPort {
+  /** Owner wallet of the escrow USDC account (the transfer destination when funding). */
+  address(): string;
+  getBalance(): Promise<bigint>;
+  /** Transfers USDC from the escrow to each row in ONE transaction, with an optional SPL memo. */
+  release(rows: { wallet: string; amount: bigint }[], opts?: { memo?: string }): Promise<{ signature: string }>;
+}
+
+/**
  * A transaction the founder signs in their own wallet (SPEC 0.4 P1, `/sign/[requestId]`).
  * `tx` is a base64 legacy transaction, possibly already partially signed by ephemeral server
  * keys (new mint / config accounts). `lastValidBlockHeight` bounds how long it can land.
@@ -153,5 +167,6 @@ export interface ChainPorts {
   market: MarketPort;
   registry: RegistryPort;
   payout: PayoutPort;
+  escrow: EscrowPort;
   wallet: WalletSigningPort;
 }
