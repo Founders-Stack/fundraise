@@ -1,0 +1,11 @@
+{
+  "name": "founder-stack",
+  "owner": { "name": "Founder Stack" },
+  "plugins": [
+    {
+      "name": "fstack",
+      "source": "./plugins/fstack",
+      "description": "Raise against a share of future distributable cash flow from Claude Code (Cash Flow Rights on Solana + Meteora DBC)."
+    }
+  ]
+}

@@ -112,10 +112,25 @@ against `CHAIN_MODE=fake`).
 
 ## Running it from your agent
 
+### Claude Code: install from the marketplace (hosted devnet)
+
+```bash
+claude plugin marketplace add Founders-Stack/fundraise
+claude plugin install fstack@founder-stack
+export FS_API_TOKEN=<token>      # ask the team for a devnet token
+claude
+> /fstack:fundraise
+```
+
+`FS_API_URL` defaults to the hosted devnet API (`https://f-stack.ai/fundraise/api`, web:
+`https://f-stack.ai/fundraise`); the plugin runs the published `fstack-mcp` via `npx`. Set `FS_API_URL`
+only to point at your own deployment.
+
+### Claude Code: from a local clone
+
 ```bash
 export FS_API_URL=http://localhost:3000/api FS_API_TOKEN=dev-local-token
-# or the hosted devnet app: FS_API_URL=https://f-stack.ai/fundraise/api (web: https://f-stack.ai/fundraise)
-claude --plugin-dir ./plugins/fstack      # Claude Code
+claude --plugin-dir ./plugins/fstack
 > /fstack:fundraise
 ```
 
