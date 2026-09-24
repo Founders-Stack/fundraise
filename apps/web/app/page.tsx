@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, ArrowUpRight, Bot, ShieldCheck, Landmark, Waves } from "lucide-react";
+import { ArrowUpRight, Bot } from "lucide-react";
 import { COPY } from "@fstack/core";
 import { currentCluster } from "@/lib/cluster";
 import { listIssuances } from "@/lib/server/issuance-record";
@@ -7,6 +7,17 @@ import { getMarketView } from "@/lib/server/market";
 import { CodeBlock } from "@/components/code-block";
 import { bps, usd, usdCompact } from "@/components/format";
 import { TokenGlyph } from "@/components/fs";
+import { LANDING_COPY } from "@/lib/landing";
+import { loadProof } from "@/lib/server/landing-proof";
+import {
+  ForBothSides,
+  HonestFraming,
+  HowItWorks,
+  LandingFooter,
+  LiveProof,
+  PilotCta,
+  WhySolana,
+} from "@/components/landing";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +59,7 @@ async function loadRows() {
 
 export default async function Home() {
   const rows = await loadRows();
+  const proof = await loadProof(rows);
 
   return (
     <div className="space-y-16 sm:space-y-20">
@@ -56,26 +68,20 @@ export default async function Home() {
         <div className="space-y-6">
           <p className="eyebrow">Cash Flow Rights · {currentCluster().copy.networkLabel}</p>
           <h1 className="text-[clamp(2.5rem,5.4vw,4rem)] leading-[0.92] font-semibold tracking-[-0.055em] text-balance">
-            Raise against your cash flow,{" "}
-            <em className="serif-accent text-[1.06em] tracking-[-0.03em]">from your coding agent</em>
+            {LANDING_COPY.hero.title}{" "}
+            <em className="serif-accent text-[1.06em] tracking-[-0.03em]">{LANDING_COPY.hero.titleAccent}</em>
           </h1>
           <p className="max-w-xl text-base text-muted-foreground text-pretty sm:text-lg">
-            Founders launch a market for a share of future Distributable Cash Flow from Claude Code or Codex.
-            Customers and fans onboard, trade on Meteora, and receive USDC each period.
+            {LANDING_COPY.hero.subline}
           </p>
           <div className="flex flex-wrap gap-3">
             <Link
-              href="#markets"
+              href="#agent"
               className="inline-flex h-10 items-center gap-2 rounded-[2px] bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-[color-mix(in_srgb,var(--primary),#000_12%)]"
             >
-              Browse markets <ArrowRight className="size-4" />
+              <Bot className="size-4" /> {LANDING_COPY.hero.ctaInstall}
             </Link>
-            <Link
-              href="#agent"
-              className="inline-flex h-10 items-center gap-2 rounded-[2px] border border-input bg-muted px-4 text-sm font-semibold hover:bg-secondary"
-            >
-              <Bot className="size-4" /> Operate from your agent
-            </Link>
+            <PilotCta href={proof.marketHref} isMainnet={proof.isMainnet} />
           </div>
           <p className="max-w-xl text-xs text-muted-foreground">
             {COPY.positioning.claim} {COPY.positioning.reported}
@@ -109,20 +115,11 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* ------------------------------------------------------------ pillars */}
-      <section className="grid gap-4 sm:grid-cols-3">
-        {[
-          { icon: Landmark, title: "A contractual claim", body: COPY.positioning.claim },
-          { icon: ShieldCheck, title: "Eligible holders only", body: COPY.positioning.eligibility },
-          { icon: Waves, title: "Liquid from day one", body: COPY.positioning.meteora },
-        ].map(({ icon: Icon, title, body }) => (
-          <div key={title} className="rounded-xl border bg-card p-5">
-            <Icon className="size-5 text-brand" />
-            <h3 className="mt-3 text-sm font-medium">{title}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">{body}</p>
-          </div>
-        ))}
-      </section>
+      <HowItWorks />
+      <ForBothSides />
+      <LiveProof proof={proof} />
+      <WhySolana />
+      <HonestFraming banner={proof.banner} />
 
       {/* ------------------------------------------------------------ markets */}
       <section id="markets" className="scroll-mt-20 space-y-4">
@@ -251,6 +248,7 @@ export default async function Home() {
           <CodeBlock label="Codex" code={CODEX} />
         </div>
       </section>
+      <LandingFooter />
     </div>
   );
 }
