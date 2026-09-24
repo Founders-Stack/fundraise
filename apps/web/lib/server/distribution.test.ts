@@ -171,7 +171,7 @@ test("SPEC section 10: Q3 Alice 4,000; trade 40k; Q4 Alice 2,700 / Bob 1,800; yi
   assert.equal(sigs3[0].fake, true);
   assert.equal(usdcOf(ALICE), 4_000n * USDC);
   const issAfterQ3 = await prisma.issuance.findUniqueOrThrow({ where: { id: iss.id } });
-  assert.equal(issAfterQ3.nextRecordDate?.toISOString(), "2026-12-30T00:00:00.000Z");
+  assert.equal(issAfterQ3.nextRecordDate?.toISOString(), "2026-12-31T23:59:59.999Z");
 
   // --- execute twice is idempotent: no second transfer
   const issuerBefore = BigInt(fakeState().issuerUsdc);

@@ -11,6 +11,7 @@ import {
   deriveLaunchPricing,
   describeFees,
   makeCashFlowTerms,
+  periodContaining,
   projectEconomics,
   renderAgreement,
   toDbcFeeParams,
@@ -116,18 +117,6 @@ export function parsePreviewInput(body: Record<string, unknown>): PreviewInput {
   if (errors.length) throw new HttpError(400, "invalid_terms", "Issuance terms are invalid", { errors: [...new Set(errors)] });
   return { terms, graduationMultiple, monetization };
 }
-
-// ---------------------------------------------------------------- dates
-
-/** End of the current calendar quarter / month (UTC, last millisecond). */
-export function endOfPeriod(now: Date, freq: DistributionFrequency): Date {
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
-  const nextStartMonth = freq === "MONTHLY" ? m + 1 : Math.floor(m / 3) * 3 + 3;
-  return new Date(Date.UTC(y, nextStartMonth, 1) - 1);
-}
-
-export const periodsPerYear = (freq: string) => (freq === "MONTHLY" ? 12 : 4);
 
 // ---------------------------------------------------------------- derivation
 
@@ -249,7 +238,7 @@ export function buildPreview(input: PreviewInput, now = new Date()) {
     },
     custody: COPY.demoCustody,
     positioning: [COPY.positioning.claim, COPY.positioning.reported, COPY.positioning.meteora],
-    nextRecordDateIfLaunchedNow: endOfPeriod(now, terms.distributionFrequency),
+    nextRecordDateIfLaunchedNow: periodContaining(now, terms.distributionFrequency).recordDate,
   };
 }
 
@@ -304,7 +293,7 @@ export async function startIssuanceCreation(previewId: unknown) {
         symbol: terms.symbol,
         name: terms.tokenName,
         distributionFrequency: terms.distributionFrequency,
-        nextRecordDate: endOfPeriod(new Date(), terms.distributionFrequency),
+        nextRecordDate: periodContaining(new Date(), terms.distributionFrequency).recordDate,
         expectedAnnualDcf: terms.expectedAnnualDcf,
         targetInitialYieldBps: terms.targetInitialYieldBps,
         graduationMultiple,

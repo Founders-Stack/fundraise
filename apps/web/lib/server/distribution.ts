@@ -5,13 +5,19 @@ import {
   allocate,
   batchTransfers,
   computeRightsPool,
+  parsePeriodLabel,
+  periodLabelFormat,
+  periodToReport,
+  periodsPerYear,
   perTokenBaseUnits,
   perTokenDisplay,
+  recordDateAfter,
   reportHash,
   yieldMetrics,
   COPY,
   DEFAULT_DCF_DEFINITION,
   DEFAULT_TOKEN_DECIMALS,
+  type DistributionFrequency,
   type HolderBalance,
 } from "@fstack/core";
 import type { Allocation, Distribution, Issuance, Participant } from "@prisma/client";
@@ -30,17 +36,6 @@ const fail = (status: number, error: string, message: string, extra: Record<stri
 
 const TOKEN_UNIT = 10n ** BigInt(DEFAULT_TOKEN_DECIMALS);
 const MAX_TRANSFERS_PER_TX = 10;
-
-export function periodsPerYear(frequency: string): number {
-  return frequency === "MONTHLY" ? 12 : 4;
-}
-
-/** Advances a record date by one period (quarter or month), in UTC. */
-export function advanceRecordDate(from: Date, frequency: string): Date {
-  const d = new Date(from.getTime());
-  d.setUTCMonth(d.getUTCMonth() + (frequency === "MONTHLY" ? 1 : 3));
-  return d;
-}
 
 export function explorerTxUrl(signature: string, mode: "fake" | "devnet"): string | null {
   return mode === "fake" ? null : `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
@@ -262,10 +257,8 @@ async function buildDetail(d: DistributionWithAll, opts: { includeBalance: boole
 
 export async function reportPeriod(issuanceId: string, input: unknown): Promise<ServiceResult> {
   const body = (input ?? {}) as { periodLabel?: unknown; dcf?: unknown; reportUrl?: unknown };
-  const periodLabel = typeof body.periodLabel === "string" ? body.periodLabel.trim() : "";
-  if (!periodLabel || periodLabel.length > 40) {
-    return fail(400, "invalid_period_label", "periodLabel is required (e.g. \"2026-Q3\"), max 40 chars");
-  }
+  const rawLabel = typeof body.periodLabel === "string" ? body.periodLabel.trim() : "";
+  if (!rawLabel) return fail(400, "invalid_period_label", "periodLabel is required (e.g. \"2026-Q3\")");
   let dcf: bigint;
   try {
     dcf = parseUsdc(body.dcf);
@@ -282,6 +275,14 @@ export async function reportPeriod(issuanceId: string, input: unknown): Promise<
 
   const issuance = await prisma.issuance.findUnique({ where: { id: issuanceId } });
   if (!issuance) return fail(404, "not_found", `issuance ${issuanceId} not found`);
+  const frequency = issuance.distributionFrequency as DistributionFrequency;
+  const period = parsePeriodLabel(rawLabel, frequency);
+  if (!period) {
+    return fail(400, "invalid_period_label", `periodLabel must be a ${frequency.toLowerCase()} period: ${periodLabelFormat(frequency)}`, {
+      nextPeriod: periodToReport(issuance.nextRecordDate, frequency, new Date()),
+    });
+  }
+  const periodLabel = period.label;
 
   const dup = await prisma.distribution.findUnique({
     where: { issuanceId_periodLabel: { issuanceId, periodLabel } },
@@ -365,7 +366,8 @@ export async function listDistributions(issuanceId: string): Promise<ServiceResu
   }
 
   const executed = issuance.distributions.filter((d) => d.status === "EXECUTED" && d.executedAt);
-  const ppy = periodsPerYear(issuance.distributionFrequency);
+  const frequency = issuance.distributionFrequency as DistributionFrequency;
+  const ppy = periodsPerYear(frequency);
   const m = yieldMetrics(
     executed.map((d) => ({ periodLabel: d.periodLabel, executedAt: d.executedAt!, rightsPool: d.rightsPool, tokenSupply: supplyBase })),
     price ?? 0n,
@@ -384,6 +386,7 @@ export async function listDistributions(issuanceId: string): Promise<ServiceResu
       poolPercentageBps: issuance.poolPercentageBps,
       distributionFrequency: issuance.distributionFrequency,
       nextRecordDate: issuance.nextRecordDate,
+      nextPeriod: periodToReport(issuance.nextRecordDate, frequency, new Date()),
       dcfDefinition: dcfDefinitionOf(issuance.agreementText),
     },
     distributions: issuance.distributions.map((d) => {
@@ -601,8 +604,10 @@ async function executeLocked(id: string, typed: bigint): Promise<ServiceResult> 
   }
 
   const executedAt = new Date();
-  // One period forward from the current record date (or from now if none was set).
-  const nextRecordDate = advanceRecordDate(d.issuance.nextRecordDate ?? executedAt, d.issuance.distributionFrequency);
+  const frequency = d.issuance.distributionFrequency as DistributionFrequency;
+  // The record date of the period after the one just paid (labels from before canonical labels fall back to the current period).
+  const paidPeriod = parsePeriodLabel(d.periodLabel, frequency) ?? periodToReport(d.issuance.nextRecordDate, frequency, executedAt);
+  const nextRecordDate = recordDateAfter(paidPeriod, d.issuance.nextRecordDate);
   await prisma.$transaction([
     prisma.distribution.update({ where: { id }, data: { status: "EXECUTED", executedAt } }),
     prisma.issuance.update({ where: { id: d.issuanceId }, data: { nextRecordDate } }),

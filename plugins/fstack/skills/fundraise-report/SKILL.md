@@ -14,11 +14,14 @@ rights pool and per-unit amount computed by the API. No money moves here; `fundr
    which one. Keep its `id`.
 2. **Read the agreement terms.** Call `fundraise_list_distributions` with the `issuanceId`. From the response
    take `issuance.dcfDefinition` (the agreement's DCF definition), `issuance.poolPercentage`,
-   `issuance.tokenSupply`, `issuance.distributionFrequency`, and the existing `distributions` (period labels
-   already used, and whether one is still open, i.e. status `DRAFT` or `SNAPSHOTTED`).
+   `issuance.tokenSupply`, `issuance.distributionFrequency`, `issuance.nextPeriod` (the period due next:
+   `label`, `start`, `recordDate`), and the existing `distributions` (period labels already used, and whether
+   one is still open, i.e. status `DRAFT` or `SNAPSHOTTED`).
    - If a distribution is still open, stop and tell the founder to finish it with `fundraise-distribute` first.
-3. **Get the period label.** Use what the founder said ("Q3" in 2026 → `2026-Q3`; monthly → `2026-09`).
-   If the year or period is unclear, ask. Never reuse a label that already exists.
+3. **Get the period label.** Default to `issuance.nextPeriod.label` (e.g. `2026-Q3`) and confirm it with the
+   founder. If they name a different period, use the same format: quarterly `YYYY-Qn`, monthly `YYYY-MM`; the
+   API rejects anything else (`400 invalid_period_label`, which also returns `details.nextPeriod`). Never
+   reuse a label that already exists. Only rows dated between the period's `start` and `recordDate` count.
 4. **Get the DCF.** Either:
    - The founder gives a number: repeat it back as USDC and ask them to confirm; or
    - The founder points to a file: read it (`Read` for CSV; for XLSX, read it with any available tool or ask

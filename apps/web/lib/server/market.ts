@@ -5,9 +5,12 @@ import {
   COPY,
   DEMO_PROTOCOL_CONFIG,
   describeFees,
+  periodToReport,
+  periodsPerYear,
   perTokenBaseUnits,
   projectEconomics,
   yieldMetrics,
+  type DistributionFrequency,
   type MonetizationConfig,
 } from "@fstack/core";
 import type { Issuance } from "@prisma/client";
@@ -15,7 +18,7 @@ import { prisma } from "@/lib/db";
 import { getChain } from "@/lib/chain";
 import { getClassifiedHolders } from "@/lib/server/holders";
 import { HttpError, appUrl } from "./http";
-import { getIssuanceOr404, parseJson, periodsPerYear } from "./issuance";
+import { getIssuanceOr404, parseJson } from "./issuance";
 import { formatUnits, pctDisplay, tokenDisplay, usdc } from "./money";
 import { agreementAcceptanceMessage } from "./agreement-message";
 
@@ -53,7 +56,8 @@ export async function getMarketView(id: string, now = new Date()) {
   const history = executed
     .filter((d) => d.executedAt)
     .map((d) => ({ periodLabel: d.periodLabel, executedAt: d.executedAt!, rightsPool: d.rightsPool, tokenSupply: supplyBase }));
-  const ppy = periodsPerYear(issuance.distributionFrequency);
+  const frequency = issuance.distributionFrequency as DistributionFrequency;
+  const ppy = periodsPerYear(frequency);
   const y = yieldMetrics(history, state.price, ppy, now, TOKEN_DECIMALS);
 
   const holders = await getClassifiedHolders(id);
@@ -115,6 +119,8 @@ export async function getMarketView(id: string, now = new Date()) {
     },
     pendingDistributions: pending,
     nextRecordDate: issuance.nextRecordDate,
+    /** The period the next report is for; its label is what fundraise_report_period expects. */
+    nextPeriod: periodToReport(issuance.nextRecordDate, frequency, now),
     distributionDue: issuance.nextRecordDate ? issuance.nextRecordDate.getTime() <= now.getTime() : false,
     economics: {
       label: COPY.illustrativeEconomics,
