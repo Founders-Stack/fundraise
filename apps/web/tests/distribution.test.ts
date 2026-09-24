@@ -1,27 +1,16 @@
-// Distribution lifecycle through the API routes in CHAIN_MODE=fake, reproducing SPEC section 10 exactly.
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { vi } from "vitest";
+// Distribution lifecycle through the API routes against the in-memory fake chain, reproducing SPEC section 10 exactly.
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { GET as historyGET, POST as reportPOST } from "@/app/api/issuances/[id]/distributions/route";
 import { GET as detailGET } from "@/app/api/distributions/[id]/route";
 import { POST as snapshotPOST } from "@/app/api/distributions/[id]/snapshot/route";
 import { POST as executePOST } from "@/app/api/distributions/[id]/execute/route";
-import { getChain } from "@/lib/chain";
-import { fakeSwap } from "@/lib/chain/fake";
+import { fake } from "./fake-chain";
 import { AUTH, call, get, launch, onboard, post, type Json } from "./helpers";
 
 const USDC = 1_000_000n;
 const TOK = 1_000_000n;
-
-const FAKE_FILE = join(process.cwd(), ".fake-chain.json");
-const fakeState = () => JSON.parse(readFileSync(FAKE_FILE, "utf8"));
-function setIssuerUsdc(baseUnits: bigint) {
-  const s = fakeState();
-  s.issuerUsdc = baseUnits.toString();
-  writeFileSync(FAKE_FILE, JSON.stringify(s));
-}
-const usdcOf = (wallet: string) => BigInt(fakeState().usdc[wallet] ?? "0");
+const { swap, setIssuerUsdc, usdcBalance: usdcOf } = fake.control;
+const payout = fake.ports.payout;
 
 const report = (issuanceId: string, body: unknown) => call(reportPOST, post(body), issuanceId);
 const snapshot = (id: string) => call(snapshotPOST, post(undefined), id);
@@ -40,7 +29,7 @@ describe("distribution lifecycle", () => {
     const iss = await launch({ symbol: "ACME-CF" });
     expect(iss.nextRecordDate).toBe("2026-09-30T23:59:59.999Z");
     const alice = await onboard(iss, "Alice");
-    fakeSwap(iss.dbcPool, alice, "BUY", 100_000n * TOK);
+    swap(iss.dbcPool, alice, "BUY", 100_000n * TOK);
 
     // --- Q3 report (label is normalized to the canonical form)
     const r3 = await report(iss.issuanceId, { periodLabel: "2026-q3", dcf: "400000", reportUrl: "https://acme.example/q3.pdf" });
@@ -112,18 +101,18 @@ describe("distribution lifecycle", () => {
     expect(e3.body.nextRecordDate).toBe("2026-12-31T23:59:59.999Z");
 
     // --- execute twice is idempotent: no second transfer; snapshot is immutable
-    const issuerBefore = BigInt(fakeState().issuerUsdc);
+    const issuerBefore = fake.control.issuerUsdc();
     const again = await execute(d3.id, "4000");
     expect(again.status).toBe(200);
     expect(again.body.alreadyExecuted).toBe(true);
-    expect(BigInt(fakeState().issuerUsdc)).toBe(issuerBefore);
+    expect(fake.control.issuerUsdc()).toBe(issuerBefore);
     expect(usdcOf(alice)).toBe(4_000n * USDC);
     expect((await snapshot(d3.id)).body.error).toBe("already_executed");
 
     // --- trade: Alice sells 40k, Bob onboards and buys 40k
-    fakeSwap(iss.dbcPool, alice, "SELL", 40_000n * TOK);
+    swap(iss.dbcPool, alice, "SELL", 40_000n * TOK);
     const bob = await onboard(iss, "Bob");
-    fakeSwap(iss.dbcPool, bob, "BUY", 40_000n * TOK);
+    swap(iss.dbcPool, bob, "BUY", 40_000n * TOK);
 
     // --- Q4: the server says which period is next
     const before = await history(iss.issuanceId);
@@ -182,7 +171,7 @@ describe("distribution lifecycle", () => {
     const wallets: string[] = [];
     for (let i = 0; i < 12; i++) {
       const w = await onboard(iss, `H${i}`);
-      fakeSwap(iss.dbcPool, w, "BUY", 10_000n * TOK);
+      swap(iss.dbcPool, w, "BUY", 10_000n * TOK);
       wallets.push(w);
     }
     const r = await report(iss.issuanceId, { periodLabel: "2026-Q3", dcf: "100000" });
@@ -190,10 +179,9 @@ describe("distribution lifecycle", () => {
     const s = await snapshot(id);
     expect(s.body.confirmTotal).toBe("1200"); // 12 x 10k tokens x 0.01
 
-    const chain = await getChain();
-    const original = chain.payout.transferBatch;
+    const original = payout.transferBatch;
     let calls = 0;
-    chain.payout.transferBatch = async (rows) => {
+    payout.transferBatch = async (rows) => {
       calls++;
       if (calls === 2) throw new Error("simulated RPC timeout");
       return original(rows);
@@ -214,7 +202,7 @@ describe("distribution lifecycle", () => {
       expect(retry.body.newSignatures).toHaveLength(1);
       expect(retry.body.signatures).toHaveLength(2);
     } finally {
-      chain.payout.transferBatch = original;
+      payout.transferBatch = original;
     }
     for (const w of wallets) expect(usdcOf(w), `each holder paid exactly once (${w})`).toBe(100n * USDC);
   });
@@ -222,13 +210,12 @@ describe("distribution lifecycle", () => {
   it("concurrent executes: one pays, the other is refused; snapshot is refused while paying", async () => {
     const iss = await launch({ symbol: "RACE-CF" });
     const alice = await onboard(iss, "Alice");
-    fakeSwap(iss.dbcPool, alice, "BUY", 100_000n * TOK);
+    swap(iss.dbcPool, alice, "BUY", 100_000n * TOK);
     const id = (await report(iss.issuanceId, { periodLabel: "2026-Q3", dcf: "400000" })).body.distribution.id;
     expect((await snapshot(id)).body.confirmTotal).toBe("4000");
 
-    const chain = await getChain();
-    const original = chain.payout.transferBatch;
-    chain.payout.transferBatch = async (rows) => {
+    const original = payout.transferBatch;
+    payout.transferBatch = async (rows) => {
       await new Promise((r) => setTimeout(r, 100));
       return original(rows);
     };
@@ -240,7 +227,7 @@ describe("distribution lifecycle", () => {
       expect(snap.status).toBe(409);
       expect(snap.body.error).toBe("execution_in_progress");
     } finally {
-      chain.payout.transferBatch = original;
+      payout.transferBatch = original;
     }
     expect(usdcOf(alice)).toBe(4_000n * USDC);
   });

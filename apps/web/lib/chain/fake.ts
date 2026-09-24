@@ -1,7 +1,7 @@
-// In-process fake chain for local dev and API tests (CHAIN_MODE=fake).
-// State is persisted to apps/web/.fake-chain.json (gitignored) so it survives
-// dev-server reloads. Deterministic, no network. Pricing is a linear toy curve,
-// NOT Meteora's — only the shapes of the ports matter here.
+// In-process fake chain for local dev and API tests (CHAIN_MODE=fake). Deterministic, no network.
+// Pricing is a linear toy curve, NOT Meteora's — only the shapes of the ports matter here.
+// State lives in a JSON file for the dev server (apps/web/.fake-chain.json, gitignored, survives
+// reloads) or in memory for tests (`createFakeChain({ file: null })`).
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -27,18 +27,33 @@ type State = {
   slot: number;
 };
 
-const FILE = join(process.cwd(), ".fake-chain.json");
 const ISSUER = "FakeIssuer1111111111111111111111111111111111";
 const QUOTE_MINT = "FakeUsdc11111111111111111111111111111111111";
 
-function load(): State {
-  if (existsSync(FILE)) return JSON.parse(readFileSync(FILE, "utf8"));
-  return { pools: {}, allow: {}, balances: {}, issuerUsdc: (10_000_000n * 1_000_000n).toString(), usdc: {}, slot: 1 };
+const initialState = (): State => ({
+  pools: {},
+  allow: {},
+  balances: {},
+  issuerUsdc: (10_000_000n * 1_000_000n).toString(),
+  usdc: {},
+  slot: 1,
+});
+
+/** Where the fake keeps its state. Every read is a fresh copy, like reading chain state. */
+function fileStore(file: string) {
+  return {
+    load: (): State => (existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : initialState()),
+    save: (s: State) => writeFileSync(file, JSON.stringify(s, null, 2)),
+  };
 }
-function save(s: State) {
-  s.slot += 1;
-  writeFileSync(FILE, JSON.stringify(s, null, 2));
+function memoryStore() {
+  let json = JSON.stringify(initialState());
+  return {
+    load: (): State => JSON.parse(json),
+    save: (s: State) => void (json = JSON.stringify(s)),
+  };
 }
+
 const addr = (prefix: string) => (prefix + randomBytes(24).toString("hex")).slice(0, 44);
 const sig = () => "fake_" + randomBytes(32).toString("hex");
 
@@ -66,33 +81,62 @@ function state(p: Pool): MarketState {
   };
 }
 
-/** Test/dev helper: simulate a confirmed swap by `owner` (used by e2e scripts, not by ports). */
-export function fakeSwap(dbcPool: string, owner: string, side: "BUY" | "SELL", tokens: bigint) {
-  const s = load();
-  const p = s.pools[dbcPool];
-  if (!p) throw new Error("unknown pool");
-  if (side === "BUY" && !(s.allow[p.baseMint] ?? []).includes(owner)) throw new Error("NotEligible");
-  const bal = (s.balances[p.baseMint] ??= {});
-  const price = priceOf(p);
-  const cost = (tokens * price) / 1_000_000n;
-  if (side === "BUY") {
-    bal[owner] = (BigInt(bal[owner] ?? "0") + tokens).toString();
-    bal[p.authority] = (BigInt(bal[p.authority]) - tokens).toString();
-    p.sold = (BigInt(p.sold) + tokens).toString();
-    p.quoteReserve = (BigInt(p.quoteReserve) + cost).toString();
-  } else {
-    if (BigInt(bal[owner] ?? "0") < tokens) throw new Error("insufficient balance");
-    bal[owner] = (BigInt(bal[owner]) - tokens).toString();
-    bal[p.authority] = (BigInt(bal[p.authority]) + tokens).toString();
-    p.sold = (BigInt(p.sold) - tokens).toString();
-    p.quoteReserve = (BigInt(p.quoteReserve) - cost).toString();
-  }
-  save(s);
-  return { signature: sig() };
+export interface FakeChainControl {
+  /** Simulates a confirmed swap by `owner` (the investor signing the tx the market port builds). */
+  swap(dbcPool: string, owner: string, side: "BUY" | "SELL", tokens: bigint): { signature: string };
+  setIssuerUsdc(baseUnits: bigint): void;
+  issuerUsdc(): bigint;
+  usdcBalance(wallet: string): bigint;
 }
 
-export function createFakePorts(): ChainPorts {
-  return {
+export interface FakeChain {
+  ports: ChainPorts;
+  control: FakeChainControl;
+}
+
+/** `file: null` keeps state in memory (tests); default is `<cwd>/.fake-chain.json` (dev server + scripts). */
+export function createFakeChain(opts: { file?: string | null } = {}): FakeChain {
+  const store = opts.file === null ? memoryStore() : fileStore(opts.file ?? join(process.cwd(), ".fake-chain.json"));
+  const load = store.load;
+  const save = (s: State) => {
+    s.slot += 1;
+    store.save(s);
+  };
+
+  const control: FakeChainControl = {
+    swap(dbcPool, owner, side, tokens) {
+      const s = load();
+      const p = s.pools[dbcPool];
+      if (!p) throw new Error("unknown pool");
+      if (side === "BUY" && !(s.allow[p.baseMint] ?? []).includes(owner)) throw new Error("NotEligible");
+      const bal = (s.balances[p.baseMint] ??= {});
+      const price = priceOf(p);
+      const cost = (tokens * price) / 1_000_000n;
+      if (side === "BUY") {
+        bal[owner] = (BigInt(bal[owner] ?? "0") + tokens).toString();
+        bal[p.authority] = (BigInt(bal[p.authority]) - tokens).toString();
+        p.sold = (BigInt(p.sold) + tokens).toString();
+        p.quoteReserve = (BigInt(p.quoteReserve) + cost).toString();
+      } else {
+        if (BigInt(bal[owner] ?? "0") < tokens) throw new Error("insufficient balance");
+        bal[owner] = (BigInt(bal[owner]) - tokens).toString();
+        bal[p.authority] = (BigInt(bal[p.authority]) + tokens).toString();
+        p.sold = (BigInt(p.sold) - tokens).toString();
+        p.quoteReserve = (BigInt(p.quoteReserve) - cost).toString();
+      }
+      save(s);
+      return { signature: sig() };
+    },
+    setIssuerUsdc(baseUnits) {
+      const s = load();
+      s.issuerUsdc = baseUnits.toString();
+      save(s);
+    },
+    issuerUsdc: () => BigInt(load().issuerUsdc),
+    usdcBalance: (wallet) => BigInt(load().usdc[wallet] ?? "0"),
+  };
+
+  const ports: ChainPorts = {
     mode: "fake",
     market: {
       async createIssuancePool(input: CreatePoolInput) {
@@ -173,4 +217,5 @@ export function createFakePorts(): ChainPorts {
       },
     },
   };
+  return { ports, control };
 }
