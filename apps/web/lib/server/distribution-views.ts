@@ -2,7 +2,6 @@
 // plus the live issuer balance check. The lifecycle rules live in ./distribution.
 import {
   allocate,
-  perTokenDisplay,
   periodToReport,
   periodsPerYear,
   yieldMetrics,
@@ -11,7 +10,7 @@ import {
 } from "@fstack/core";
 import type { Allocation, Distribution, Participant } from "@prisma/client";
 import { getChain } from "@/lib/chain";
-import { pctOfSupply, tokensDisplay, usdc, usdcDisplay } from "./distribution-money";
+import { pctDisplay, pctOfSupply, tokenAmount, usdc } from "./money";
 import type { IssuanceRecord } from "./issuance-record";
 
 export type DistributionWithAll = Distribution & {
@@ -22,10 +21,6 @@ export type DistributionWithAll = Distribution & {
 
 export function explorerTxUrl(signature: string, mode: "fake" | "devnet"): string | null {
   return mode === "fake" ? null : `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
-}
-
-function bpsToPct(bps: number): string {
-  return `${bps / 100}%`;
 }
 
 export function executionLeaseHeld(d: Pick<Distribution, "executingUntil">, now = new Date()): boolean {
@@ -89,28 +84,23 @@ function parseSnapshot(json: string | null): StoredSnapshot | null {
 
 // ---------------------------------------------------------------- shapes
 
-export function distributionSummary(d: Distribution, issuance: IssuanceRecord) {
-  const supplyBase = issuance.supplyBaseUnits;
+export function distributionSummary(d: Distribution) {
   return {
     id: d.id,
     issuanceId: d.issuanceId,
     periodLabel: d.periodLabel,
     status: d.status,
     dcf: usdc(d.dcf),
-    dcfBaseUnits: d.dcf,
     reportUrl: d.reportUrl,
     reportHash: d.reportHash,
     poolPercentageBps: d.poolPercentageBps,
-    poolPercentage: bpsToPct(d.poolPercentageBps),
+    poolPercentage: pctDisplay(d.poolPercentageBps),
     rightsPool: usdc(d.rightsPool),
-    rightsPoolBaseUnits: d.rightsPool,
-    perToken: perTokenDisplay(d.rightsPool, supplyBase, issuance.terms.tokenDecimals),
-    perTokenBaseUnits: d.perTokenBaseUnits,
+    /** USDC per whole token, floored. */
+    perToken: usdc(d.perTokenBaseUnits),
     snapshotSlot: d.snapshotSlot,
     totalAllocated: d.totalAllocated === null ? null : usdc(d.totalAllocated),
-    totalAllocatedBaseUnits: d.totalAllocated,
     unallocated: d.unallocated === null ? null : usdc(d.unallocated),
-    unallocatedBaseUnits: d.unallocated,
     executedAt: d.executedAt,
     createdAt: d.createdAt,
   };
@@ -120,17 +110,12 @@ export function distributionSummary(d: Distribution, issuance: IssuanceRecord) {
 export function reportedPeriodView(d: Distribution, issuance: IssuanceRecord) {
   const { terms } = issuance;
   return {
-    distribution: distributionSummary(d, issuance),
+    distribution: distributionSummary(d),
     issuance: {
       id: issuance.id,
       symbol: terms.symbol,
       tokenSupply: terms.tokenSupply,
-      poolPercentage: bpsToPct(terms.poolPercentageBps),
-    },
-    display: {
-      dcf: usdcDisplay(d.dcf),
-      rightsPool: usdcDisplay(d.rightsPool),
-      perToken: perTokenDisplay(d.rightsPool, issuance.supplyBaseUnits, terms.tokenDecimals),
+      poolPercentage: pctDisplay(terms.poolPercentageBps),
     },
     next: "Run fundraise_snapshot with this distributionId to preview allocations.",
   };
@@ -164,7 +149,7 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
   const { issuance } = d;
   const { terms } = issuance;
   const supplyBase = issuance.supplyBaseUnits;
-  const tokens = (baseUnits: bigint) => tokensDisplay(baseUnits, terms.tokenDecimals);
+  const tokens = (baseUnits: bigint) => tokenAmount(baseUnits, terms.tokenDecimals);
   const names = new Map(d.participants.map((p) => [p.id, p.displayName]));
   const namesByWallet = new Map(d.participants.map((p) => [p.wallet, p.displayName]));
   const snap = parseSnapshot(d.snapshotJson);
@@ -177,11 +162,8 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
     displayName: (a.participantId ? names.get(a.participantId) : namesByWallet.get(a.wallet)) ?? null,
     participantId: a.participantId,
     tokens: tokens(a.tokens),
-    tokensBaseUnits: a.tokens,
     pctOfSupply: pctOfSupply(a.tokens, supplyBase),
     payout: usdc(a.payout),
-    payoutDisplay: usdcDisplay(a.payout),
-    payoutBaseUnits: a.payout,
     paid: Boolean(a.txSignature),
     txSignature: a.txSignature,
     explorerUrl: a.txSignature ? explorerTxUrl(a.txSignature, chain.mode) : null,
@@ -192,7 +174,6 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
     kind: e.kind,
     label: e.kind === "POOL" ? "Market (DBC pool)" : "Unregistered wallet",
     tokens: tokens(BigInt(e.tokens)),
-    tokensBaseUnits: e.tokens,
     pctOfSupply: pctOfSupply(BigInt(e.tokens), supplyBase),
     retainedShare: usdc(BigInt(e.retainedShare)),
   }));
@@ -204,7 +185,6 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
       : {
           label: COPY.unallocated,
           total: usdc(d.unallocated),
-          totalDisplay: usdcDisplay(d.unallocated),
           breakdown: {
             marketPool: usdc(BigInt(b.pool)),
             unregistered: usdc(BigInt(b.unregistered)),
@@ -224,9 +204,7 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
       issuerAddress: chain.payout.issuerAddress(),
       quoteMint: chain.payout.quoteMint(),
       balance: usdc(bal),
-      balanceDisplay: usdcDisplay(bal),
       required: usdc(remaining),
-      requiredDisplay: usdcDisplay(remaining),
       sufficient: shortfall === 0n,
       shortfall: usdc(shortfall),
     };
@@ -241,14 +219,14 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
 
   return {
     chainMode: chain.mode,
-    distribution: distributionSummary(d, issuance),
+    distribution: distributionSummary(d),
     executionInProgress: d.status !== "EXECUTED" && executionLeaseHeld(d),
     issuance: {
       id: issuance.id,
       issuerName: terms.issuerName,
       symbol: terms.symbol,
       tokenSupply: terms.tokenSupply,
-      poolPercentage: bpsToPct(terms.poolPercentageBps),
+      poolPercentage: pctDisplay(terms.poolPercentageBps),
       distributionFrequency: terms.distributionFrequency,
       nextRecordDate: issuance.nextRecordDate,
     },
@@ -262,16 +240,15 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
         : {
             rightsPool: usdc(d.rightsPool),
             totalAllocated: usdc(d.totalAllocated),
-            totalAllocatedDisplay: usdcDisplay(d.totalAllocated),
             unallocated: d.unallocated === null ? null : usdc(d.unallocated),
-            perToken: perTokenDisplay(d.rightsPool, supplyBase, terms.tokenDecimals),
-            payees: rows.filter((r) => r.payoutBaseUnits > 0n).length,
+            perToken: usdc(d.perTokenBaseUnits),
+            payees: rows.filter((r) => r.payout.baseUnits > 0n).length,
             paid: rows.filter((r) => r.paid).length,
             remainingToPay: usdc(remaining),
           },
     balance,
     /** The exact string the founder must type back to execute (USDC decimal, not base units). */
-    confirmTotal: d.status === "SNAPSHOTTED" && d.totalAllocated !== null ? usdc(d.totalAllocated) : null,
+    confirmTotal: d.status === "SNAPSHOTTED" && d.totalAllocated !== null ? usdc(d.totalAllocated).usdc : null,
     signatures: signaturesOf(d.allocations, chain.mode),
     warnings,
   };
@@ -299,15 +276,13 @@ export function distributionHistory(
     now,
     terms.tokenDecimals,
   );
-  const bpsStr = (b: number | null) => (b === null ? null : `${(b / 100).toFixed(2)}%`);
-
   return {
     issuance: {
       id: issuance.id,
       issuerName: terms.issuerName,
       symbol: terms.symbol,
       tokenSupply: terms.tokenSupply,
-      poolPercentage: bpsToPct(terms.poolPercentageBps),
+      poolPercentage: pctDisplay(terms.poolPercentageBps),
       poolPercentageBps: terms.poolPercentageBps,
       distributionFrequency: terms.distributionFrequency,
       nextRecordDate: issuance.nextRecordDate,
@@ -317,7 +292,7 @@ export function distributionHistory(
     distributions: distributions.map((d) => {
       const paid = d.allocations.filter((a) => a.txSignature);
       return {
-        ...distributionSummary(d, issuance),
+        ...distributionSummary(d),
         allocations: {
           count: d.allocations.length,
           paidCount: paid.length,
@@ -326,7 +301,7 @@ export function distributionHistory(
             .map((a) => ({
               wallet: a.wallet,
               displayName: a.participantId ? (names.get(a.participantId) ?? null) : null,
-              tokens: tokensDisplay(a.tokens, terms.tokenDecimals),
+              tokens: tokenAmount(a.tokens, terms.tokenDecimals),
               pctOfSupply: pctOfSupply(a.tokens, supplyBase),
               payout: usdc(a.payout),
               txSignature: a.txSignature,
@@ -342,10 +317,10 @@ export function distributionHistory(
       currentPrice: price === null ? null : usdc(price),
       lastPerToken: usdc(m.lastPerToken),
       ttmPerToken: usdc(m.ttmPerToken),
-      trailingYield: bpsStr(m.trailingYieldBps),
+      trailingYield: pctDisplay(m.trailingYieldBps),
       trailingYieldBps: m.trailingYieldBps,
       annualizedRunRatePerToken: usdc(m.annualizedRunRatePerToken),
-      annualizedYield: bpsStr(m.annualizedYieldBps),
+      annualizedYield: pctDisplay(m.annualizedYieldBps),
       annualizedYieldBps: m.annualizedYieldBps,
       isAnnualized: m.isAnnualized,
     },

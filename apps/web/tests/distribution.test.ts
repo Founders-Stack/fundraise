@@ -36,8 +36,8 @@ describe("distribution lifecycle", () => {
     expect(r3.status, JSON.stringify(r3.body)).toBe(201);
     const d3 = r3.body.distribution;
     expect(d3.periodLabel).toBe("2026-Q3");
-    expect(d3.rightsPool).toBe("40000");
-    expect(d3.perToken).toBe("0.04");
+    expect(d3.rightsPool).toEqual({ baseUnits: "40000000000", usdc: "40000", display: "$40,000" });
+    expect(d3.perToken.display).toBe("$0.04");
     expect(d3.status).toBe("DRAFT");
     expect(d3.reportHash).toMatch(/^[0-9a-f]{64}$/);
 
@@ -57,14 +57,17 @@ describe("distribution lifecycle", () => {
     const s3 = await snapshot(d3.id);
     expect(s3.status, JSON.stringify(s3.body)).toBe(200);
     const rows3 = s3.body.rows;
-    expect(rows3.map((r: Json) => [r.wallet, r.displayName, r.payout, r.tokens, r.pctOfSupply])).toEqual([
-      [alice, "Alice", "4000", "100,000", "10.00%"],
+    expect(rows3.map((r: Json) => [r.wallet, r.displayName, r.payout.usdc, r.tokens.display, r.pctOfSupply])).toEqual([
+      [alice, "Alice", "4000", "100,000", "10%"],
     ]);
+    expect(rows3[0].payout).toEqual({ baseUnits: "4000000000", usdc: "4000", display: "$4,000" });
+    expect(rows3[0].tokens).toEqual({ baseUnits: "100000000000", amount: "100000", display: "100,000" });
     expect(s3.body.confirmTotal).toBe("4000");
     expect(s3.body.unallocated.label).toBe("Unallocated (retained by issuer)");
-    expect(s3.body.unallocated.total).toBe("36000");
-    expect(s3.body.unallocated.breakdown.marketPool).toBe("36000");
-    expect(s3.body.excluded.map((e: Json) => [e.kind, e.tokens])).toEqual([["POOL", "900,000"]]);
+    expect(s3.body.unallocated.total.display).toBe("$36,000");
+    expect(s3.body.unallocated.breakdown.marketPool.usdc).toBe("36000");
+    expect(s3.body.excluded.map((e: Json) => [e.kind, e.tokens.display])).toEqual([["POOL", "900,000"]]);
+    expect(s3.body.totals.totalAllocated.display).toBe("$4,000");
     expect(s3.body.balance.sufficient).toBe(true);
 
     // re-snapshot allowed while not executed (replaces allocations)
@@ -87,7 +90,7 @@ describe("distribution lifecycle", () => {
     const poor = await execute(d3.id, "4000");
     expect(poor.status).toBe(409);
     expect(poor.body.error).toBe("insufficient_balance");
-    expect(poor.body.details.shortfall).toBe("3000");
+    expect(poor.body.details.shortfall.usdc).toBe("3000");
     expect(usdcOf(alice)).toBe(0n);
     setIssuerUsdc(1_000_000n * USDC);
 
@@ -120,15 +123,15 @@ describe("distribution lifecycle", () => {
     const r4 = await report(iss.issuanceId, { periodLabel: before.body.issuance.nextPeriod.label, dcf: "450000.00" });
     expect(r4.status, JSON.stringify(r4.body)).toBe(201);
     const d4 = r4.body.distribution;
-    expect(d4.rightsPool).toBe("45000");
-    expect(d4.perToken).toBe("0.045");
+    expect(d4.rightsPool.usdc).toBe("45000");
+    expect(d4.perToken.display, "per-token amounts are shown exactly, not rounded to cents").toBe("$0.045");
     const s4 = await snapshot(d4.id);
-    expect(s4.body.rows.map((r: Json) => [r.displayName, r.tokens, r.payout])).toEqual([
+    expect(s4.body.rows.map((r: Json) => [r.displayName, r.tokens.display, r.payout.usdc])).toEqual([
       ["Alice", "60,000", "2700"],
       ["Bob", "40,000", "1800"],
     ]);
     expect(s4.body.confirmTotal).toBe("4500");
-    expect(s4.body.unallocated.total).toBe("40500");
+    expect(s4.body.unallocated.total.usdc).toBe("40500");
     const e4 = await execute(d4.id, "4500");
     expect(e4.status, JSON.stringify(e4.body)).toBe(200);
     expect(usdcOf(alice)).toBe(6_700n * USDC);
@@ -145,9 +148,9 @@ describe("distribution lifecycle", () => {
     expect(h.body.issuance.nextPeriod.label).toBe("2027-Q1");
     const y = h.body.yield;
     expect(y.periods).toBe(2);
-    expect(y.lastPerToken).toBe("0.045");
-    expect(y.ttmPerToken).toBe("0.085");
-    expect(y.annualizedRunRatePerToken).toBe("0.18");
+    expect(y.lastPerToken.usdc).toBe("0.045");
+    expect(y.ttmPerToken.usdc).toBe("0.085");
+    expect(y.annualizedRunRatePerToken.display).toBe("$0.18");
     expect(y.isAnnualized).toBe(true);
     expect(y.annualizedNote).toBe("annualized from 2 periods");
     expect(typeof y.trailingYield).toBe("string");

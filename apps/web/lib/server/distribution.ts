@@ -23,7 +23,7 @@ import {
 import { prisma } from "@/lib/db";
 import { getChain } from "@/lib/chain";
 import { getClassifiedHolders } from "@/lib/server/holders";
-import { MoneyParseError, parseUsdc, usdc } from "./distribution-money";
+import { MoneyParseError, parseUsdc, usdc } from "./money";
 import {
   distributionDetail,
   distributionHistory,

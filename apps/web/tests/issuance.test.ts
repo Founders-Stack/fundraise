@@ -133,6 +133,8 @@ describe("participants", () => {
     const iss = await (await holdersGET(new Request("http://test", { headers: AUTH }), ctx(issuanceId))).json();
     expect(iss.participants[0].displayName).toBe("Alice");
     expect(iss.holders[0].kind).toBe("POOL");
+    expect(iss.holders[0].tokens).toEqual({ baseUnits: "1000000000000", amount: "1000000", display: "1,000,000" });
+    expect(iss.holders[0].pctOfSupply).toBe("100%");
   });
 
   it("rejects a signature over the wrong message or by another key", async () => {

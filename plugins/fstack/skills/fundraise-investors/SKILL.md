@@ -26,7 +26,7 @@ Call `fundraise_list_holders` with `issuanceId`.
 
 | Holder | Wallet | Type | Tokens | % of supply |
 |---|---|---|---|---|
-| `displayName` or "—" | `wallet` (shorten to first 4…last 4) | `label` | `tokensDisplay` | `pctOfSupply` |
+| `displayName` or "—" | `wallet` (shorten to first 4…last 4) | `label` | `tokens.display` | `pctOfSupply` |
 
 The `POOL` row is the Meteora market's inventory: say it is unallocated for distributions.
 

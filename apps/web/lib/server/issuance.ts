@@ -28,7 +28,7 @@ import {
   requireMarket,
   type IssuanceRecord,
 } from "./issuance-record";
-import { isqrt, parseUnits, pctDisplay, tokenDisplay, usdc, usdDisplay } from "./money";
+import { parseUsdc, pctDisplay, tokenDisplay, usdc, usdDisplay } from "./money";
 
 export const DEFAULT_GRADUATION_MULTIPLE = 3;
 export const DEFAULT_TOKEN_SUPPLY = 1_000_000n;
@@ -39,6 +39,17 @@ export const DEFAULT_TOKEN_SUPPLY = 1_000_000n;
  * After creation, the market endpoint uses the pool's real migrationQuoteThreshold.
  */
 export const ILLUSTRATIVE_SOLD_FRACTION_BPS = 8000n;
+
+function isqrt(n: bigint): bigint {
+  if (n < 2n) return n;
+  let x = n;
+  let y = (x + 1n) / 2n;
+  while (y < x) {
+    x = y;
+    y = (x + n / x) / 2n;
+  }
+  return x;
+}
 
 // ---------------------------------------------------------------- input
 
@@ -78,7 +89,7 @@ export function parsePreviewInput(body: Record<string, unknown>): PreviewInput {
   if (typeof dcfRaw !== "string") errors.push('expectedAnnualDcf must be a USDC decimal string, e.g. "1600000"');
   else {
     try {
-      expectedAnnualDcf = parseUnits(dcfRaw);
+      expectedAnnualDcf = parseUsdc(dcfRaw);
     } catch (e) {
       errors.push(`expectedAnnualDcf: ${(e as Error).message}`);
     }
@@ -158,8 +169,8 @@ export function buildPreview(input: PreviewInput, now = new Date()) {
   const econ = projectEconomics(monetization, estimatedThreshold);
   const { issuerPct, platformPct, liquidityPct } = monetization.graduation;
   const { creatorPct, partnerPct } = monetization.dbcTradingFees;
-  const poolPct = pctDisplay(terms.poolPercentageBps)!;
-  const yieldPct = pctDisplay(terms.targetInitialYieldBps)!;
+  const poolPct = pctDisplay(terms.poolPercentageBps);
+  const yieldPct = pctDisplay(terms.targetInitialYieldBps);
   const freqWord = terms.distributionFrequency === "MONTHLY" ? "monthly" : "quarterly";
 
   return {

@@ -15,7 +15,7 @@ import { getChain } from "@/lib/chain";
 import { getClassifiedHolders } from "@/lib/server/holders";
 import { HttpError, appUrl } from "./http";
 import { loadIssuance, requireMarket } from "./issuance-record";
-import { formatUnits, pctDisplay, tokenDisplay, usdc } from "./money";
+import { formatUnits, pctDisplay, pctOfSupply, tokenAmount, usdc } from "./money";
 import { agreementAcceptanceMessage } from "./agreement-message";
 
 export function progressBar(bps: number, width = 20): string {
@@ -143,9 +143,8 @@ export async function getHoldersView(id: string, isIssuer: boolean) {
         label: KIND_LABEL[h.kind],
         displayName: isIssuer ? (p?.displayName ?? null) : undefined,
         participantId: h.participantId ?? null,
-        tokens: h.amount,
-        tokensDisplay: tokenDisplay(h.amount, issuance.terms.tokenDecimals),
-        pctOfSupply: pctDisplay(supply > 0n ? Number((h.amount * 10_000n) / supply) : 0),
+        tokens: tokenAmount(h.amount, issuance.terms.tokenDecimals),
+        pctOfSupply: pctOfSupply(h.amount, supply),
         flag: h.kind === "UNREGISTERED" ? "Holder is not a registered participant; counts as unallocated" : null,
       };
     });
@@ -295,7 +294,7 @@ export async function quoteView(id: string, sideRaw: unknown, amountIn: bigint) 
   // Meteora keeps its protocol share; only the remaining trading fee is split startup / Founder Stack.
   const tradingFee = q.poolFee - q.protocolFee;
   const fsFee = (tradingFee * BigInt(m.dbcTradingFees.partnerPct)) / 100n;
-  const token = (a: bigint) => ({ baseUnits: a, amount: formatUnits(a, tokenDecimals), display: `${tokenDisplay(a, tokenDecimals)} ${symbol}` });
+  const token = (a: bigint) => tokenAmount(a, tokenDecimals, symbol);
   const pay = side === "BUY" ? { asset: "USDC", ...usdc(q.amountIn) } : { asset: symbol, ...token(q.amountIn) };
   const receive = side === "BUY" ? { asset: symbol, ...token(q.amountOut) } : { asset: "USDC", ...usdc(q.amountOut) };
   return {
