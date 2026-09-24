@@ -9,6 +9,7 @@
     "build:web": "pnpm --filter web build",
     "build:mcp": "pnpm --filter @fstack/mcp build",
     "db:migrate": "pnpm --filter web db:migrate",
-    "mcp": "node packages/fstack-mcp/dist/index.js"
+    "mcp": "node packages/fstack-mcp/dist/index.js",
+    "demo:e2e": "apps/web/node_modules/.bin/tsx scripts/demo-e2e.ts"
   }
 }
