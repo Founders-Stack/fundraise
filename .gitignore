@@ -17,3 +17,4 @@ apps/web/.env
 apps/web/.fake-chain.json
 .claude/worktrees/
 apps/web/.demo-e2e.json
+.vercel
