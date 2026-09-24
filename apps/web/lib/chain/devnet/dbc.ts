@@ -180,10 +180,14 @@ export interface CreatedPool {
 }
 
 /**
- * tx1: DBC createConfigAndPoolWithTransferHook (partner/feeClaimer/payer = FS authority, creator = issuer).
+ * tx1: DBC createConfig (partner config only; no mint exists yet, nothing to front-run).
+ * tx2 (atomic, H12): DBC initialize_virtual_pool_with_token2022_transfer_hook
+ *      + fs_allowlist.initialize(mint, admin = FS authority) + add_allow(DBC pool authority).
  *      DBC creates the Token-2022 mint with TransferHook{program: fs_allowlist, authority: DBC pool authority}
- *      and mints the supply into the base vault (MintTo doesn't invoke the hook).
- * tx2: fs_allowlist.initialize(mint, admin = FS authority) + add_allow(DBC pool authority).
+ *      and mints the supply into the base vault (MintTo doesn't invoke the hook), so the hook's
+ *      Config/ExtraAccountMetaList can be created later in the same tx. The mint therefore never
+ *      exists on-chain without its allowlist Config. Config + pool + hook init in ONE legacy tx is
+ *      1380 bytes (> 1232), which is why createConfig is split off; pool + hook init is ~1044 bytes.
  */
 export async function createHookPool(
   env: DevnetEnv,
@@ -213,12 +217,17 @@ export async function createHookPool(
       baseMint: baseMintKp.publicKey,
     },
   });
-  const t1 = new Transaction().add(...computeBudgetIxs(600_000), ...tx1.instructions);
+  const [createConfigIx, createPoolIx, ...rest] = tx1.instructions;
+  if (!createConfigIx || !createPoolIx || rest.length) {
+    throw new Error(`createConfigAndPoolWithTransferHook: expected 2 instructions, got ${tx1.instructions.length}`);
+  }
+  const t1 = new Transaction().add(...computeBudgetIxs(200_000), createConfigIx);
   t1.feePayer = fsAuthority.publicKey;
-  const sig1 = await sendTx(connection, t1, [fsAuthority, configKp, baseMintKp, issuer], "createConfigAndPoolWithTransferHook");
+  const sig1 = await sendTx(connection, t1, [fsAuthority, configKp], "dbc.createConfig");
 
   const t2 = new Transaction().add(
-    ...computeBudgetIxs(200_000),
+    ...computeBudgetIxs(600_000),
+    createPoolIx,
     initializeIx({
       program: allowlistProgram,
       payer: fsAuthority.publicKey,
@@ -234,7 +243,12 @@ export async function createHookPool(
     }),
   );
   t2.feePayer = fsAuthority.publicKey;
-  const sig2 = await sendTx(connection, t2, [fsAuthority], "fs_allowlist.initialize+add_allow(pool authority)");
+  const sig2 = await sendTx(
+    connection,
+    t2,
+    [fsAuthority, baseMintKp, issuer],
+    "createPoolWithTransferHook+fs_allowlist.initialize+add_allow(pool authority)",
+  );
 
   const pool = deriveDbcPoolAddress(quoteMint, baseMintKp.publicKey, configKp.publicKey);
   return {

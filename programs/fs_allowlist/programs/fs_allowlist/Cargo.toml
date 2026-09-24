@@ -11,6 +11,8 @@ name = "fs_allowlist"
 
 [features]
 default = []
+# Mainnet build: FS_AUTHORITY comes from the FS_AUTHORITY_MAINNET env var at compile time.
+mainnet = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-log-ix-name = []

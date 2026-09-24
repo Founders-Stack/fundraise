@@ -21,7 +21,12 @@ Faucet: issuer 10,000,000 USDC (`hgghkdeaxQdhPyzDZxKSGdYc2nVSLgpjAaoaocMEzULny9X
   `TransferHook { program_id: fs_allowlist, authority: DBC pool authority }` and **mints** the
   whole supply into the base vault. MintTo does not invoke the hook. DBC never CPIs into the hook
   program at creation time, so it never calls `InitializeExtraAccountMetaList`.
-  → Our `initialize` runs as a separate tx right after the pool (signed by `FS_AUTHORITY`, which is hardcoded in the program), then `add_allow(pool authority)`.
+  → H12 (A27): `createHookPool` sends DBC `createConfig` first (no mint yet, nothing to front-run), then ONE atomic tx
+  `[DBC create pool (mints hook-enabled mint), fs_allowlist.initialize (signed by FS_AUTHORITY), add_allow(pool authority)]`.
+  The mint never exists without its allowlist Config. All four ixs in one legacy tx would be 1380 bytes (> 1232 limit),
+  hence the config split; pool + hook init is ~1044 bytes. Devnet proof: config `5XYLJgKap7p5vaMb1wUrbSa7CY9uu5QKmNhKChXz7eUL5JGxF4n7THPSRRwkso4bd3FXPAo5F2HVtyzUmvmd7psd`,
+  atomic pool+initialize+add_allow `4gEBMWrhVw8PdUXP3KUDrxhaQi34XN1Ch6ckGs15oztWQVdQUwzyozd4aUJDPcsccXpUHYu8LLW5a6co1W9qPJNq` (pool `AGQRHrpKQ9xeAo4DMz5zsKHehMshGUqDwXxejek22Dmn`); the spike's buy/sell/NotEligible checks passed on that pool.
+  `FS_AUTHORITY` is a compile-time constant (devnet default; mainnet: `FS_AUTHORITY_MAINNET=<pubkey> anchor build -- --features mainnet`).
 - Swaps (`swap2_with_transfer_hook`) forward the remaining accounts to Token-2022, which resolves the extra-account-meta list on-chain.
   The SDK's client-side resolver passes `PublicKey.default` as the destination, so it **cannot** resolve our `AccountData` seed (destination owner) and throws.
   → `lib/chain/devnet/dbc.ts` overrides the resolver with `[AllowEntry(dest owner), fs_allowlist, ExtraAccountMetaList]`. The destination owner is the buyer on a BUY and the DBC pool authority on a SELL.
