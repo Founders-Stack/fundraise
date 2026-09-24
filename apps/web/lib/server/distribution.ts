@@ -19,8 +19,6 @@ import {
   perTokenBaseUnits,
   recordDateAfter,
   reportHash,
-  DEFAULT_TOKEN_DECIMALS,
-  type DistributionFrequency,
 } from "@fstack/core";
 import { prisma } from "@/lib/db";
 import { getChain } from "@/lib/chain";
@@ -35,8 +33,8 @@ import {
   type DistributionWithAll,
 } from "./distribution-views";
 import { HttpError } from "./http";
+import { loadIssuance, toIssuanceRecord } from "./issuance-record";
 
-const TOKEN_UNIT = 10n ** BigInt(DEFAULT_TOKEN_DECIMALS);
 const MAX_TRANSFERS_PER_TX = 10;
 /**
  * How long one execute holds the row. Longer than the execute route's maxDuration (60s), so a live
@@ -45,10 +43,13 @@ const MAX_TRANSFERS_PER_TX = 10;
 export const EXECUTION_LEASE_MS = 120_000;
 
 async function loadDistribution(id: string): Promise<DistributionWithAll | null> {
-  return prisma.distribution.findUnique({
+  const row = await prisma.distribution.findUnique({
     where: { id },
     include: { issuance: { include: { participants: true } }, allocations: true },
   });
+  if (!row) return null;
+  const { issuance, ...distribution } = row;
+  return { ...distribution, issuance: toIssuanceRecord(issuance), participants: issuance.participants };
 }
 
 async function loadOr404(id: string): Promise<DistributionWithAll> {
@@ -80,9 +81,8 @@ export async function reportPeriod(issuanceId: string, input: unknown) {
     reportUrl = body.reportUrl;
   }
 
-  const issuance = await prisma.issuance.findUnique({ where: { id: issuanceId } });
-  if (!issuance) throw new HttpError(404, "not_found", `issuance ${issuanceId} not found`);
-  const frequency = issuance.distributionFrequency as DistributionFrequency;
+  const issuance = await loadIssuance(issuanceId);
+  const frequency = issuance.terms.distributionFrequency;
   const period = parsePeriodLabel(rawLabel, frequency);
   if (!period) {
     throw new HttpError(400, "invalid_period_label", `periodLabel must be a ${frequency.toLowerCase()} period: ${periodLabelFormat(frequency)}`, {
@@ -109,7 +109,8 @@ export async function reportPeriod(issuanceId: string, input: unknown) {
     });
   }
 
-  const rightsPool = computeRightsPool(dcf, issuance.poolPercentageBps);
+  const { poolPercentageBps, tokenDecimals } = issuance.terms;
+  const rightsPool = computeRightsPool(dcf, poolPercentageBps);
   const d = await prisma.distribution.create({
     data: {
       issuanceId,
@@ -117,9 +118,9 @@ export async function reportPeriod(issuanceId: string, input: unknown) {
       dcf,
       reportUrl: reportUrl ?? null,
       reportHash: reportHash({ issuanceId, periodLabel, dcf, reportUrl }),
-      poolPercentageBps: issuance.poolPercentageBps,
+      poolPercentageBps,
       rightsPool,
-      perTokenBaseUnits: perTokenBaseUnits(rightsPool, issuance.tokenSupply * TOKEN_UNIT),
+      perTokenBaseUnits: perTokenBaseUnits(rightsPool, issuance.supplyBaseUnits, tokenDecimals),
       status: "DRAFT",
     },
   });
@@ -129,25 +130,22 @@ export async function reportPeriod(issuanceId: string, input: unknown) {
 // ---------------------------------------------------------------- reads
 
 export async function listDistributions(issuanceId: string) {
-  const issuance = await prisma.issuance.findUnique({
-    where: { id: issuanceId },
-    include: {
-      participants: true,
-      distributions: { include: { allocations: true }, orderBy: { createdAt: "asc" } },
-    },
-  });
-  if (!issuance) throw new HttpError(404, "not_found", `issuance ${issuanceId} not found`);
+  const issuance = await loadIssuance(issuanceId);
+  const [participants, distributions] = await Promise.all([
+    prisma.participant.findMany({ where: { issuanceId } }),
+    prisma.distribution.findMany({ where: { issuanceId }, include: { allocations: true }, orderBy: { createdAt: "asc" } }),
+  ]);
 
   const chain = await getChain();
   let price: bigint | null = null;
-  if (issuance.dbcPool) {
+  if (issuance.market) {
     try {
-      price = (await chain.market.getMarketState(issuance.dbcPool)).price;
+      price = (await chain.market.getMarketState(issuance.market.dbcPool)).price;
     } catch {
       price = null;
     }
   }
-  return distributionHistory(issuance, price, chain.mode);
+  return distributionHistory(issuance, participants, distributions, price, chain.mode);
 }
 
 export async function getDistribution(id: string) {
@@ -160,7 +158,7 @@ export async function snapshotDistribution(id: string) {
   const d = await loadOr404(id);
   assertSnapshotAllowed(d);
 
-  const classified = await getClassifiedHolders(d.issuanceId);
+  const classified = await getClassifiedHolders(d.issuance);
   const result = allocate(
     { slot: classified.slot, tokenSupply: classified.tokenSupply, holders: classified.holders },
     d.rightsPool,
@@ -333,7 +331,7 @@ async function payClaimed(id: string, lease: Lease) {
   }
 
   const executedAt = new Date();
-  const frequency = d.issuance.distributionFrequency as DistributionFrequency;
+  const frequency = d.issuance.terms.distributionFrequency;
   // The record date of the period after the one just paid (labels from before canonical labels fall back to the current period).
   const paidPeriod = parsePeriodLabel(d.periodLabel, frequency) ?? periodToReport(d.issuance.nextRecordDate, frequency, executedAt);
   const nextRecordDate = recordDateAfter(paidPeriod, d.issuance.nextRecordDate);

@@ -7,32 +7,21 @@ import {
   periodsPerYear,
   yieldMetrics,
   COPY,
-  DEFAULT_DCF_DEFINITION,
-  DEFAULT_TOKEN_DECIMALS,
-  type DistributionFrequency,
   type HolderBalance,
 } from "@fstack/core";
-import type { Allocation, Distribution, Issuance, Participant } from "@prisma/client";
+import type { Allocation, Distribution, Participant } from "@prisma/client";
 import { getChain } from "@/lib/chain";
 import { pctOfSupply, tokensDisplay, usdc, usdcDisplay } from "./distribution-money";
-
-const TOKEN_UNIT = 10n ** BigInt(DEFAULT_TOKEN_DECIMALS);
+import type { IssuanceRecord } from "./issuance-record";
 
 export type DistributionWithAll = Distribution & {
-  issuance: Issuance & { participants: Participant[] };
+  issuance: IssuanceRecord;
+  participants: Participant[];
   allocations: Allocation[];
 };
 
 export function explorerTxUrl(signature: string, mode: "fake" | "devnet"): string | null {
   return mode === "fake" ? null : `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
-}
-
-/** Extracts the agreement's DCF definition (rendered by core renderAgreement), falling back to the default. */
-export function dcfDefinitionOf(agreementText: string): string {
-  const m = /\*\*Distributable Cash Flow \(DCF\)\*\* means, for each period: ([\s\S]*?) DCF is issuer-reported/.exec(
-    agreementText,
-  );
-  return m ? m[1].trim() : DEFAULT_DCF_DEFINITION;
 }
 
 function bpsToPct(bps: number): string {
@@ -100,8 +89,8 @@ function parseSnapshot(json: string | null): StoredSnapshot | null {
 
 // ---------------------------------------------------------------- shapes
 
-export function distributionSummary(d: Distribution, issuance: Pick<Issuance, "tokenSupply">) {
-  const supplyBase = issuance.tokenSupply * TOKEN_UNIT;
+export function distributionSummary(d: Distribution, issuance: IssuanceRecord) {
+  const supplyBase = issuance.supplyBaseUnits;
   return {
     id: d.id,
     issuanceId: d.issuanceId,
@@ -115,7 +104,7 @@ export function distributionSummary(d: Distribution, issuance: Pick<Issuance, "t
     poolPercentage: bpsToPct(d.poolPercentageBps),
     rightsPool: usdc(d.rightsPool),
     rightsPoolBaseUnits: d.rightsPool,
-    perToken: perTokenDisplay(d.rightsPool, supplyBase),
+    perToken: perTokenDisplay(d.rightsPool, supplyBase, issuance.terms.tokenDecimals),
     perTokenBaseUnits: d.perTokenBaseUnits,
     snapshotSlot: d.snapshotSlot,
     totalAllocated: d.totalAllocated === null ? null : usdc(d.totalAllocated),
@@ -128,20 +117,20 @@ export function distributionSummary(d: Distribution, issuance: Pick<Issuance, "t
 }
 
 /** Body of POST /api/issuances/:id/distributions. */
-export function reportedPeriodView(d: Distribution, issuance: Issuance) {
-  const supplyBase = issuance.tokenSupply * TOKEN_UNIT;
+export function reportedPeriodView(d: Distribution, issuance: IssuanceRecord) {
+  const { terms } = issuance;
   return {
     distribution: distributionSummary(d, issuance),
     issuance: {
       id: issuance.id,
-      symbol: issuance.symbol,
-      tokenSupply: issuance.tokenSupply,
-      poolPercentage: bpsToPct(issuance.poolPercentageBps),
+      symbol: terms.symbol,
+      tokenSupply: terms.tokenSupply,
+      poolPercentage: bpsToPct(terms.poolPercentageBps),
     },
     display: {
       dcf: usdcDisplay(d.dcf),
       rightsPool: usdcDisplay(d.rightsPool),
-      perToken: perTokenDisplay(d.rightsPool, supplyBase),
+      perToken: perTokenDisplay(d.rightsPool, issuance.supplyBaseUnits, terms.tokenDecimals),
     },
     next: "Run fundraise_snapshot with this distributionId to preview allocations.",
   };
@@ -172,10 +161,12 @@ function signaturesOf(allocs: Allocation[], mode: "fake" | "devnet") {
  */
 export async function distributionDetail(d: DistributionWithAll, opts: { includeBalance: boolean }) {
   const chain = await getChain();
-  const issuance = d.issuance;
-  const supplyBase = issuance.tokenSupply * TOKEN_UNIT;
-  const names = new Map(issuance.participants.map((p) => [p.id, p.displayName]));
-  const namesByWallet = new Map(issuance.participants.map((p) => [p.wallet, p.displayName]));
+  const { issuance } = d;
+  const { terms } = issuance;
+  const supplyBase = issuance.supplyBaseUnits;
+  const tokens = (baseUnits: bigint) => tokensDisplay(baseUnits, terms.tokenDecimals);
+  const names = new Map(d.participants.map((p) => [p.id, p.displayName]));
+  const namesByWallet = new Map(d.participants.map((p) => [p.wallet, p.displayName]));
   const snap = parseSnapshot(d.snapshotJson);
 
   const allocs = [...d.allocations].sort((a, b) =>
@@ -185,7 +176,7 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
     wallet: a.wallet,
     displayName: (a.participantId ? names.get(a.participantId) : namesByWallet.get(a.wallet)) ?? null,
     participantId: a.participantId,
-    tokens: tokensDisplay(a.tokens),
+    tokens: tokens(a.tokens),
     tokensBaseUnits: a.tokens,
     pctOfSupply: pctOfSupply(a.tokens, supplyBase),
     payout: usdc(a.payout),
@@ -200,7 +191,7 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
     wallet: e.owner,
     kind: e.kind,
     label: e.kind === "POOL" ? "Market (DBC pool)" : "Unregistered wallet",
-    tokens: tokensDisplay(BigInt(e.tokens)),
+    tokens: tokens(BigInt(e.tokens)),
     tokensBaseUnits: e.tokens,
     pctOfSupply: pctOfSupply(BigInt(e.tokens), supplyBase),
     retainedShare: usdc(BigInt(e.retainedShare)),
@@ -254,14 +245,14 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
     executionInProgress: d.status !== "EXECUTED" && executionLeaseHeld(d),
     issuance: {
       id: issuance.id,
-      issuerName: issuance.issuerName,
-      symbol: issuance.symbol,
-      tokenSupply: issuance.tokenSupply,
-      poolPercentage: bpsToPct(issuance.poolPercentageBps),
-      distributionFrequency: issuance.distributionFrequency,
+      issuerName: terms.issuerName,
+      symbol: terms.symbol,
+      tokenSupply: terms.tokenSupply,
+      poolPercentage: bpsToPct(terms.poolPercentageBps),
+      distributionFrequency: terms.distributionFrequency,
       nextRecordDate: issuance.nextRecordDate,
     },
-    snapshot: snap ? { slot: snap.slot, takenAt: snap.takenAt, tokenSupply: tokensDisplay(BigInt(snap.tokenSupply)) } : null,
+    snapshot: snap ? { slot: snap.slot, takenAt: snap.takenAt, tokenSupply: tokens(BigInt(snap.tokenSupply)) } : null,
     rows,
     excluded,
     unallocated,
@@ -273,7 +264,7 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
             totalAllocated: usdc(d.totalAllocated),
             totalAllocatedDisplay: usdcDisplay(d.totalAllocated),
             unallocated: d.unallocated === null ? null : usdc(d.unallocated),
-            perToken: perTokenDisplay(d.rightsPool, supplyBase),
+            perToken: perTokenDisplay(d.rightsPool, supplyBase, terms.tokenDecimals),
             payees: rows.filter((r) => r.payoutBaseUnits > 0n).length,
             paid: rows.filter((r) => r.paid).length,
             remainingToPay: usdc(remaining),
@@ -288,39 +279,42 @@ export async function distributionDetail(d: DistributionWithAll, opts: { include
 
 // ---------------------------------------------------------------- history (public)
 
-type IssuanceWithHistory = Issuance & {
-  participants: Participant[];
-  distributions: (Distribution & { allocations: Allocation[] })[];
-};
-
 /** Body of GET /api/issuances/:id/distributions. `price` is null when the market can't be read. */
-export function distributionHistory(issuance: IssuanceWithHistory, price: bigint | null, mode: "fake" | "devnet", now = new Date()) {
-  const supplyBase = issuance.tokenSupply * TOKEN_UNIT;
-  const names = new Map(issuance.participants.map((p) => [p.id, p.displayName]));
-  const executed = issuance.distributions.filter((d) => d.status === "EXECUTED" && d.executedAt);
-  const frequency = issuance.distributionFrequency as DistributionFrequency;
+export function distributionHistory(
+  issuance: IssuanceRecord,
+  participants: Participant[],
+  distributions: (Distribution & { allocations: Allocation[] })[],
+  price: bigint | null,
+  mode: "fake" | "devnet",
+  now = new Date(),
+) {
+  const { terms } = issuance;
+  const supplyBase = issuance.supplyBaseUnits;
+  const names = new Map(participants.map((p) => [p.id, p.displayName]));
+  const executed = distributions.filter((d) => d.status === "EXECUTED" && d.executedAt);
   const m = yieldMetrics(
     executed.map((d) => ({ periodLabel: d.periodLabel, executedAt: d.executedAt!, rightsPool: d.rightsPool, tokenSupply: supplyBase })),
     price ?? 0n,
-    periodsPerYear(frequency),
+    periodsPerYear(terms.distributionFrequency),
     now,
+    terms.tokenDecimals,
   );
   const bpsStr = (b: number | null) => (b === null ? null : `${(b / 100).toFixed(2)}%`);
 
   return {
     issuance: {
       id: issuance.id,
-      issuerName: issuance.issuerName,
-      symbol: issuance.symbol,
-      tokenSupply: issuance.tokenSupply,
-      poolPercentage: bpsToPct(issuance.poolPercentageBps),
-      poolPercentageBps: issuance.poolPercentageBps,
-      distributionFrequency: issuance.distributionFrequency,
+      issuerName: terms.issuerName,
+      symbol: terms.symbol,
+      tokenSupply: terms.tokenSupply,
+      poolPercentage: bpsToPct(terms.poolPercentageBps),
+      poolPercentageBps: terms.poolPercentageBps,
+      distributionFrequency: terms.distributionFrequency,
       nextRecordDate: issuance.nextRecordDate,
-      nextPeriod: periodToReport(issuance.nextRecordDate, frequency, now),
-      dcfDefinition: dcfDefinitionOf(issuance.agreementText),
+      nextPeriod: periodToReport(issuance.nextRecordDate, terms.distributionFrequency, now),
+      dcfDefinition: terms.distributableCashFlowDefinition,
     },
-    distributions: issuance.distributions.map((d) => {
+    distributions: distributions.map((d) => {
       const paid = d.allocations.filter((a) => a.txSignature);
       return {
         ...distributionSummary(d, issuance),
@@ -332,7 +326,7 @@ export function distributionHistory(issuance: IssuanceWithHistory, price: bigint
             .map((a) => ({
               wallet: a.wallet,
               displayName: a.participantId ? (names.get(a.participantId) ?? null) : null,
-              tokens: tokensDisplay(a.tokens),
+              tokens: tokensDisplay(a.tokens, terms.tokenDecimals),
               pctOfSupply: pctOfSupply(a.tokens, supplyBase),
               payout: usdc(a.payout),
               txSignature: a.txSignature,

@@ -1,8 +1,8 @@
-import { prisma } from "@/lib/db";
 import { requireIssuer } from "@/lib/auth";
 import { json } from "@/lib/json";
 import { handle, readJson } from "@/lib/server/http";
 import { createIssuance, publicIssuanceView } from "@/lib/server/issuance";
+import { listIssuances } from "@/lib/server/issuance-record";
 
 export const dynamic = "force-dynamic";
 
@@ -11,18 +11,15 @@ export async function GET(req: Request) {
   const denied = requireIssuer(req);
   if (denied) return denied;
   return handle(async () => {
-    const issuances = await prisma.issuance.findMany({
-      orderBy: { createdAt: "desc" },
-      include: { _count: { select: { participants: true, distributions: true } } },
-    });
+    const issuances = await listIssuances();
     return json({
-      issuances: issuances.map((i) => {
-        const { agreement, ...view } = publicIssuanceView(i);
+      issuances: issuances.map(({ record, participantCount, distributionCount }) => {
+        const { agreement, ...view } = publicIssuanceView(record);
         return {
           ...view,
           agreement: { version: agreement.version, hash: agreement.hash },
-          participantCount: i._count.participants,
-          distributionCount: i._count.distributions,
+          participantCount,
+          distributionCount,
         };
       }),
     });

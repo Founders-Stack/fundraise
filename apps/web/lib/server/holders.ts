@@ -4,6 +4,7 @@
 import type { HolderBalance } from "@fstack/core";
 import { prisma } from "@/lib/db";
 import { getChain } from "@/lib/chain";
+import { requireMarket, type IssuanceRecord } from "./issuance-record";
 
 export interface ClassifiedHolders {
   slot: number;
@@ -13,28 +14,14 @@ export interface ClassifiedHolders {
   unregisteredCount: number;
 }
 
-/** Pool owners are stored in Issuance.dbcConfig JSON as `poolOwners: string[]`. */
-export function poolOwnersOf(dbcConfigJson: string | null): string[] {
-  if (!dbcConfigJson) return [];
-  try {
-    const cfg = JSON.parse(dbcConfigJson) as { poolOwners?: string[] };
-    return cfg.poolOwners ?? [];
-  } catch {
-    return [];
-  }
-}
-
-export async function getClassifiedHolders(issuanceId: string): Promise<ClassifiedHolders> {
-  const issuance = await prisma.issuance.findUniqueOrThrow({
-    where: { id: issuanceId },
-    include: { participants: true },
-  });
-  if (!issuance.baseMint) throw new Error(`issuance ${issuanceId} has no baseMint yet`);
+export async function getClassifiedHolders(issuance: IssuanceRecord): Promise<ClassifiedHolders> {
+  const { baseMint, poolOwners } = requireMarket(issuance);
+  const participants = await prisma.participant.findMany({ where: { issuanceId: issuance.id } });
 
   const chain = await getChain();
-  const { slot, holders } = await chain.registry.getHolders(issuance.baseMint, poolOwnersOf(issuance.dbcConfig));
+  const { slot, holders } = await chain.registry.getHolders(baseMint, poolOwners);
 
-  const byWallet = new Map(issuance.participants.map((p) => [p.wallet, p]));
+  const byWallet = new Map(participants.map((p) => [p.wallet, p]));
   const classified = holders.map((h): HolderBalance => {
     if (h.kind === "POOL") return h;
     const p = byWallet.get(h.owner);
@@ -43,10 +30,9 @@ export async function getClassifiedHolders(issuanceId: string): Promise<Classifi
     return { ...h, kind: "UNREGISTERED" };
   });
 
-  const decimals = 6n; // rights token decimals (SPEC section 5)
   return {
     slot,
-    tokenSupply: issuance.tokenSupply * 10n ** decimals,
+    tokenSupply: issuance.supplyBaseUnits,
     holders: classified,
     unregisteredCount: classified.filter((h) => h.kind === "UNREGISTERED").length,
   };

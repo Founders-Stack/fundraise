@@ -1,11 +1,8 @@
 // Issuance preview → create (SPEC sections 0.3, 5, 8). The API is the brain: every
 // number a skill shows comes from here, as base units + human-readable strings.
-import type { Issuance } from "@prisma/client";
 import {
   AGREEMENT_VERSION,
   COPY,
-  DEFAULT_DCF_DEFINITION,
-  DEFAULT_RECORD_DATE_RULE,
   DEMO_PROTOCOL_CONFIG,
   agreementHash,
   deriveLaunchPricing,
@@ -24,6 +21,13 @@ import {
 import { prisma } from "@/lib/db";
 import { getChain } from "@/lib/chain";
 import { HttpError, appUrl } from "./http";
+import {
+  attachMarket,
+  deleteIssuance,
+  insertPendingIssuance,
+  requireMarket,
+  type IssuanceRecord,
+} from "./issuance-record";
 import { isqrt, parseUnits, pctDisplay, tokenDisplay, usdc, usdDisplay } from "./money";
 
 export const DEFAULT_GRADUATION_MULTIPLE = 3;
@@ -119,8 +123,6 @@ export function parsePreviewInput(body: Record<string, unknown>): PreviewInput {
 }
 
 // ---------------------------------------------------------------- derivation
-
-const bigintReplacer = (_k: string, v: unknown) => (typeof v === "bigint" ? v.toString() : v);
 
 function serializeTerms(i: PreviewInput) {
   return JSON.stringify(
@@ -285,28 +287,17 @@ export async function startIssuanceCreation(previewId: unknown) {
   const pricing = deriveLaunchPricing(terms, graduationMultiple);
   const agreementText = renderAgreement(terms);
   try {
-    const issuance = await prisma.issuance.create({
-      data: {
-        issuerName: terms.issuerName,
-        poolPercentageBps: terms.poolPercentageBps,
-        tokenSupply: terms.tokenSupply,
-        symbol: terms.symbol,
-        name: terms.tokenName,
-        distributionFrequency: terms.distributionFrequency,
-        nextRecordDate: periodContaining(new Date(), terms.distributionFrequency).recordDate,
-        expectedAnnualDcf: terms.expectedAnnualDcf,
-        targetInitialYieldBps: terms.targetInitialYieldBps,
-        graduationMultiple,
-        agreementVersion: terms.agreementVersion,
-        agreementHash: agreementHash(agreementText),
-        agreementText,
-        startingMarketCap: pricing.startingMarketCap,
-        graduationMarketCap: pricing.graduationMarketCap,
-        monetization: JSON.stringify(monetization),
-      },
+    const issuance = await insertPendingIssuance({
+      terms,
+      graduationMultiple,
+      startingMarketCap: pricing.startingMarketCap,
+      graduationMarketCap: pricing.graduationMarketCap,
+      agreement: { hash: agreementHash(agreementText), text: agreementText },
+      monetization,
+      nextRecordDate: periodContaining(new Date(), terms.distributionFrequency).recordDate,
     });
     await prisma.issuancePreview.update({ where: { id: previewId }, data: { issuanceId: issuance.id } });
-    return { issuance, input };
+    return issuance;
   } catch (e) {
     await prisma.issuancePreview.update({ where: { id: previewId }, data: { usedAt: null } });
     throw e;
@@ -314,57 +305,53 @@ export async function startIssuanceCreation(previewId: unknown) {
 }
 
 /** Step 2 (slow, on-chain): mint + hook + DBC pool. On failure the row is removed and the preview released. */
-export async function completeIssuanceCreation(issuance: Issuance, input: PreviewInput, previewId: string) {
+export async function completeIssuanceCreation(issuance: IssuanceRecord, previewId: string): Promise<IssuanceRecord> {
   const chain = await getChain();
+  const { terms } = issuance;
   try {
     const res = await chain.market.createIssuancePool({
-      name: input.terms.tokenName,
-      symbol: input.terms.symbol,
+      name: terms.tokenName,
+      symbol: terms.symbol,
       uri: `${appUrl()}/api/issuances/${issuance.id}`,
-      tokenSupply: input.terms.tokenSupply,
-      tokenDecimals: input.terms.tokenDecimals,
+      tokenSupply: terms.tokenSupply,
+      tokenDecimals: terms.tokenDecimals,
       startingMarketCap: issuance.startingMarketCap,
       graduationMarketCap: issuance.graduationMarketCap,
-      fees: toDbcFeeParams(input.monetization),
+      fees: toDbcFeeParams(issuance.monetization),
       creatorLockedLiquidityPercentage: 100,
     });
-    return await prisma.issuance.update({
-      where: { id: issuance.id },
-      data: {
-        baseMint: res.baseMint,
-        dbcPool: res.dbcPool,
-        quoteMint: chain.payout.quoteMint(),
-        dbcConfig: JSON.stringify({
-          address: res.dbcConfig,
-          poolOwners: res.poolOwners,
-          dbcParams: res.dbcParams,
-          signatures: res.signatures,
-          chainMode: chain.mode,
-        }, bigintReplacer),
-      },
+    return await attachMarket(issuance.id, {
+      baseMint: res.baseMint,
+      quoteMint: chain.payout.quoteMint(),
+      dbcPool: res.dbcPool,
+      dbcConfig: res.dbcConfig,
+      poolOwners: res.poolOwners,
+      signatures: res.signatures,
+      dbcParams: res.dbcParams,
+      chainMode: chain.mode,
     });
   } catch (e) {
-    await prisma.issuance.delete({ where: { id: issuance.id } }).catch(() => {});
+    await deleteIssuance(issuance.id);
     await prisma.issuancePreview.update({ where: { id: previewId }, data: { usedAt: null, issuanceId: null } });
     throw new HttpError(502, "chain_error", `Creating the market failed; the preview can be retried: ${(e as Error).message}`);
   }
 }
 
 export async function createIssuance(previewId: unknown) {
-  const { issuance, input } = await startIssuanceCreation(previewId);
-  const done = await completeIssuanceCreation(issuance, input, previewId as string);
-  const cfg = parseJson<{ address?: string; signatures?: string[] }>(done.dbcConfig) ?? {};
+  const pending = await startIssuanceCreation(previewId);
+  const done = await completeIssuanceCreation(pending, previewId as string);
+  const market = requireMarket(done);
   return {
     issuanceId: done.id,
     status: "LIVE",
-    symbol: done.symbol,
-    baseMint: done.baseMint,
-    quoteMint: done.quoteMint,
-    dbcConfig: cfg.address,
-    dbcPool: done.dbcPool,
-    signatures: cfg.signatures ?? [],
-    chainMode: (await getChain()).mode,
-    agreementHash: done.agreementHash,
+    symbol: done.terms.symbol,
+    baseMint: market.baseMint,
+    quoteMint: market.quoteMint,
+    dbcConfig: market.dbcConfig,
+    dbcPool: market.dbcPool,
+    signatures: market.signatures,
+    chainMode: market.chainMode,
+    agreementHash: done.agreement.hash,
     nextRecordDate: done.nextRecordDate,
     marketUrl: `${appUrl()}/market/${done.id}`,
     onboardUrl: `${appUrl()}/onboard/${done.id}`,
@@ -374,76 +361,55 @@ export async function createIssuance(previewId: unknown) {
 
 // ---------------------------------------------------------------- views
 
-export function parseJson<T>(s: string | null | undefined): T | null {
-  if (!s) return null;
-  try {
-    return JSON.parse(s) as T;
-  } catch {
-    return null;
-  }
-}
-
-export async function getIssuanceOr404(id: string) {
-  const issuance = await prisma.issuance.findUnique({ where: { id } });
-  if (!issuance) throw new HttpError(404, "issuance_not_found", `No issuance ${id}`);
-  return issuance;
-}
-
-/** Launch terms as stored with the preview that created the issuance (source of dcfDefinition etc.). */
-export async function getLaunchTerms(issuanceId: string): Promise<CashFlowTerms | null> {
-  const preview = await prisma.issuancePreview.findFirst({ where: { issuanceId } });
-  return preview ? deserializeTerms(preview.termsJson).terms : null;
-}
-
 /** Public, secret-free view (GET /api/issuances/:id). Also serves as the token metadata URI. */
-export function publicIssuanceView(i: Issuance, launchTerms: CashFlowTerms | null = null) {
-  const dcfDefinition = launchTerms?.distributableCashFlowDefinition ?? DEFAULT_DCF_DEFINITION;
-  const monetization = parseJson<MonetizationConfig>(i.monetization) ?? DEMO_PROTOCOL_CONFIG;
-  const cfg = parseJson<{ address?: string; poolOwners?: string[]; signatures?: string[]; dbcParams?: unknown }>(i.dbcConfig);
+export function publicIssuanceView(rec: IssuanceRecord) {
+  const { terms, market } = rec;
+  const dcfDefinition = terms.distributableCashFlowDefinition;
   return {
-    id: i.id,
+    id: rec.id,
     // metadata-style fields (the token's uri points here)
-    name: i.name,
-    symbol: i.symbol,
-    description: `${COPY.positioning.claim} ${i.issuerName}: ${pctDisplay(i.poolPercentageBps)} of ${i.distributionFrequency.toLowerCase()} Distributable Cash Flow.`,
-    issuerName: i.issuerName,
-    rightsType: i.rightsType,
-    status: i.baseMint ? "LIVE" : "PENDING",
+    name: terms.tokenName,
+    symbol: terms.symbol,
+    description: `${COPY.positioning.claim} ${terms.issuerName}: ${pctDisplay(terms.poolPercentageBps)} of ${terms.distributionFrequency.toLowerCase()} Distributable Cash Flow.`,
+    issuerName: terms.issuerName,
+    rightsType: rec.rightsType,
+    status: market ? "LIVE" : "PENDING",
     dcfDefinition,
     terms: {
-      tokenName: i.name,
-      issuerJurisdiction: launchTerms?.issuerJurisdiction ?? null,
+      tokenName: terms.tokenName,
+      issuerJurisdiction: terms.issuerJurisdiction,
       distributableCashFlowDefinition: dcfDefinition,
-      recordDateRule: launchTerms?.recordDateRule ?? DEFAULT_RECORD_DATE_RULE,
-      poolPercentageBps: i.poolPercentageBps,
-      poolPercentage: pctDisplay(i.poolPercentageBps),
-      tokenSupply: i.tokenSupply,
-      tokenSupplyDisplay: tokenDisplay(i.tokenSupply, 0),
-      distributionFrequency: i.distributionFrequency,
-      expectedAnnualDcf: usdc(i.expectedAnnualDcf),
-      targetInitialYieldBps: i.targetInitialYieldBps,
-      targetInitialYield: pctDisplay(i.targetInitialYieldBps),
-      graduationMultiple: i.graduationMultiple,
-      startingMarketCap: usdc(i.startingMarketCap),
-      graduationMarketCap: usdc(i.graduationMarketCap),
-      startingPricePerToken: usdc(i.startingMarketCap / i.tokenSupply),
+      recordDateRule: terms.recordDateRule,
+      poolPercentageBps: terms.poolPercentageBps,
+      poolPercentage: pctDisplay(terms.poolPercentageBps),
+      tokenSupply: terms.tokenSupply,
+      tokenSupplyDisplay: tokenDisplay(terms.tokenSupply, 0),
+      tokenDecimals: terms.tokenDecimals,
+      distributionFrequency: terms.distributionFrequency,
+      expectedAnnualDcf: usdc(terms.expectedAnnualDcf),
+      targetInitialYieldBps: terms.targetInitialYieldBps,
+      targetInitialYield: pctDisplay(terms.targetInitialYieldBps),
+      graduationMultiple: rec.graduationMultiple,
+      startingMarketCap: usdc(rec.startingMarketCap),
+      graduationMarketCap: usdc(rec.graduationMarketCap),
+      startingPricePerToken: usdc(rec.startingMarketCap / terms.tokenSupply),
       marketCapLabel: COPY.marketCap,
     },
-    agreement: { version: i.agreementVersion, hash: i.agreementHash, text: i.agreementText },
+    agreement: rec.agreement,
     chain: {
-      baseMint: i.baseMint,
-      quoteMint: i.quoteMint,
-      dbcConfig: cfg?.address ?? null,
-      dbcPool: i.dbcPool,
-      dammPool: i.dammPool,
-      poolOwners: cfg?.poolOwners ?? [],
-      signatures: cfg?.signatures ?? [],
+      baseMint: market?.baseMint ?? null,
+      quoteMint: market?.quoteMint ?? null,
+      dbcConfig: market?.dbcConfig ?? null,
+      dbcPool: market?.dbcPool ?? null,
+      dammPool: market?.dammPool ?? null,
+      poolOwners: market?.poolOwners ?? [],
+      signatures: market?.signatures ?? [],
     },
-    fees: { mode: monetization.mode, description: describeFees(monetization) },
-    nextRecordDate: i.nextRecordDate,
-    marketUrl: `${appUrl()}/market/${i.id}`,
-    onboardUrl: `${appUrl()}/onboard/${i.id}`,
+    fees: { mode: rec.monetization.mode, description: describeFees(rec.monetization) },
+    nextRecordDate: rec.nextRecordDate,
+    marketUrl: `${appUrl()}/market/${rec.id}`,
+    onboardUrl: `${appUrl()}/onboard/${rec.id}`,
     custody: COPY.demoCustody,
-    createdAt: i.createdAt,
+    createdAt: rec.createdAt,
   };
 }
