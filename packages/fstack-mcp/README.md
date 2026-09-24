@@ -36,7 +36,9 @@ agent can't skip the preview. Executing twice is a no-op; retrying after a parti
 Read tools carry `readOnlyHint: true`. `fundraise_preview_issuance` takes `expectedAnnualDcf` as a USDC
 **decimal string** (`"1600000"` = $1.6M) and rates in basis points (`poolPercentageBps: 1000` = 10%).
 `fundraise_create_issuance` is gated server-side: a missing/unknown `previewId` → `400`, a reused one → `409`.
-All money in responses is `{ baseUnits, usdc, display }` (USDC 6 dp).
+Every response uses the same amount shapes: USDC is `{ baseUnits, usdc, display }` (6 dp, `display` exact,
+e.g. `"$0.045"`), token amounts are `{ baseUnits, amount, display }`, percentages are strings (`"10%"`).
+Errors are `{ error, message, details }`.
 
 Errors come back as `isError: true` with `{ error, status, body }` so the calling skill can
 stop and show the message (e.g. `401` → check `FS_API_TOKEN`).

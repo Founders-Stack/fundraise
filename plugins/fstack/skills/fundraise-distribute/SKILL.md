@@ -15,15 +15,16 @@ Snapshot → preview → founder types the total → execute → signatures. Thi
    `$fstack-fundraise-report`) and stop. If the founder named a period, make sure it matches.
 2. **Snapshot.** Call `fundraise_snapshot` with the `distributionId`. It reads holders on-chain now and
    stores an immutable snapshot (re-running replaces the preview until execution).
-3. **Show the preview** exactly as returned:
-   - Header: period, DCF, rights pool (`distribution.rightsPool`), per unit (`totals.perToken`), snapshot slot.
+3. **Show the preview** exactly as returned. Every amount is an object; show its `display` string.
+   - Header: period, DCF (`distribution.dcf`), rights pool (`distribution.rightsPool`), per unit
+     (`totals.perToken`), snapshot slot.
    - Payout table from `rows`: **Holder** (`displayName`, else short wallet), **Wallet**, **Units** (`tokens`),
-     **% of supply** (`pctOfSupply`), **Payout (USDC)** (`payoutDisplay`).
+     **% of supply** (`pctOfSupply`), **Payout** (`payout`).
    - Excluded holders from `excluded` (e.g. "Market (DBC pool)", unregistered wallets) with their units.
-   - **Unallocated (retained by issuer)**: `unallocated.totalDisplay`, with the breakdown (market pool,
+   - **Unallocated (retained by issuer)**: `unallocated.total`, with the breakdown (market pool,
      unregistered, unsold, rounding dust).
-   - **Total to pay**: `totals.totalAllocatedDisplay` to `totals.payees` holders.
-   - **Balance check**: issuer wallet `balance.balanceDisplay` vs required `balance.requiredDisplay`. If
+   - **Total to pay**: `totals.totalAllocated` to `totals.payees` holders.
+   - **Balance check**: issuer wallet `balance.balance` vs required `balance.required`. If
      `balance.sufficient` is false, show `balance.shortfall`, tell the founder to fund the issuer wallet
      (`balance.issuerAddress`), and stop.
    - Any `warnings`.
@@ -38,11 +39,17 @@ Snapshot → preview → founder types the total → execute → signatures. Thi
 
 ## Errors
 
-- `400 confirm_total_mismatch`: the typed total differs from the snapshot; re-show the preview, ask again.
+Errors are `{ error, message, details }`; the fields below are under `details`.
+
+- `400 confirm_total_mismatch`: the typed total differs from the snapshot (or the snapshot was re-taken since
+  the preview); re-show the preview, ask again.
 - `409 insufficient_balance`: show `balance`, `required`, `shortfall`; the founder funds the wallet, then retry.
 - `502 partial_execution`: some batches were paid and recorded. Show `newSignatures`, then retry
   `fundraise_execute_distribution` with the **same** confirmTotal; only unpaid holders are paid.
+- `409 execution_in_progress`: another execute of this distribution is running. Wait a minute, then call
+  `fundraise_get_distribution` to see what was paid; never snapshot again while it runs.
 - `409 not_snapshotted`: run step 2. `409 already_executed` on snapshot: the period is done; show history.
+  `409 payout_in_progress` on snapshot: some holders were already paid; retry execute instead.
 - Calling execute again after success is a no-op (`alreadyExecuted: true`); nothing is paid twice.
 
 ## Rules

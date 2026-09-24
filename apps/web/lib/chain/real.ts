@@ -130,20 +130,14 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
         return { signature };
       },
 
-      async getHolders(mint: string, poolOwners: string[]) {
+      async getBalances(mint: string, extraOwners: string[]) {
         const r = await listHolders(connection, new PublicKey(mint), {
           allowlistProgram,
-          extraOwners: [...poolOwners, DBC_POOL_AUTHORITY.toBase58()],
+          extraOwners: [...extraOwners, DBC_POOL_AUTHORITY.toBase58()],
         });
-        const pools = new Set(poolOwners);
         return {
           slot: r.slot,
-          holders: r.holders.map((h) => ({
-            owner: h.owner,
-            tokenAccount: h.tokenAccount,
-            amount: h.amount,
-            kind: pools.has(h.owner) ? ("POOL" as const) : ("UNREGISTERED" as const),
-          })),
+          balances: r.holders.map((h) => ({ owner: h.owner, tokenAccount: h.tokenAccount, amount: h.amount })),
         };
       },
     },

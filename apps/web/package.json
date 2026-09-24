@@ -11,7 +11,7 @@
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && tsx --test lib/server/distribution.test.ts"
+    "test": "vitest run"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",

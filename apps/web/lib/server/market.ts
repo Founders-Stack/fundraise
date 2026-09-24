@@ -3,32 +3,20 @@ import nacl from "tweetnacl";
 import bs58 from "bs58";
 import {
   COPY,
-  DEMO_PROTOCOL_CONFIG,
   describeFees,
+  periodToReport,
+  periodsPerYear,
   perTokenBaseUnits,
   projectEconomics,
   yieldMetrics,
-  type MonetizationConfig,
 } from "@fstack/core";
-import type { Issuance } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getChain } from "@/lib/chain";
 import { getClassifiedHolders } from "@/lib/server/holders";
 import { HttpError, appUrl } from "./http";
-import { getIssuanceOr404, parseJson, periodsPerYear } from "./issuance";
-import { formatUnits, pctDisplay, tokenDisplay, usdc } from "./money";
+import { loadIssuance, requireMarket } from "./issuance-record";
+import { formatUnits, pctDisplay, pctOfSupply, tokenAmount, usdc } from "./money";
 import { agreementAcceptanceMessage } from "./agreement-message";
-
-const TOKEN_DECIMALS = 6;
-
-function monetizationOf(i: Issuance): MonetizationConfig {
-  return parseJson<MonetizationConfig>(i.monetization) ?? DEMO_PROTOCOL_CONFIG;
-}
-
-function requireLive(i: Issuance): { dbcPool: string; baseMint: string } {
-  if (!i.dbcPool || !i.baseMint) throw new HttpError(409, "issuance_pending", `Issuance ${i.id} has no market yet`);
-  return { dbcPool: i.dbcPool, baseMint: i.baseMint };
-}
 
 export function progressBar(bps: number, width = 20): string {
   const clamped = Math.max(0, Math.min(10_000, bps));
@@ -39,28 +27,28 @@ export function progressBar(bps: number, width = 20): string {
 // ---------------------------------------------------------------- market
 
 export async function getMarketView(id: string, now = new Date()) {
-  const issuance = await getIssuanceOr404(id);
-  const { dbcPool } = requireLive(issuance);
+  const issuance = await loadIssuance(id);
+  const { dbcPool } = requireMarket(issuance);
+  const { terms, monetization } = issuance;
   const chain = await getChain();
   const state = await chain.market.getMarketState(dbcPool);
-  const monetization = monetizationOf(issuance);
 
   const executed = await prisma.distribution.findMany({
     where: { issuanceId: id, status: "EXECUTED" },
     orderBy: { executedAt: "asc" },
   });
-  const supplyBase = issuance.tokenSupply * 10n ** BigInt(TOKEN_DECIMALS);
+  const supplyBase = issuance.supplyBaseUnits;
   const history = executed
     .filter((d) => d.executedAt)
     .map((d) => ({ periodLabel: d.periodLabel, executedAt: d.executedAt!, rightsPool: d.rightsPool, tokenSupply: supplyBase }));
-  const ppy = periodsPerYear(issuance.distributionFrequency);
-  const y = yieldMetrics(history, state.price, ppy, now, TOKEN_DECIMALS);
+  const ppy = periodsPerYear(terms.distributionFrequency);
+  const y = yieldMetrics(history, state.price, ppy, now, terms.tokenDecimals);
 
-  const holders = await getClassifiedHolders(id);
+  const holders = await getClassifiedHolders(issuance);
   const nonPool = holders.holders.filter((h) => h.kind !== "POOL");
   const econ = projectEconomics(monetization, state.migrationQuoteThreshold);
   const { issuerPct, platformPct, liquidityPct } = monetization.graduation;
-  const marketCap = (state.price * issuance.tokenSupply);
+  const marketCap = state.price * terms.tokenSupply;
 
   const pending = await prisma.distribution.findMany({
     where: { issuanceId: id, status: { in: ["DRAFT", "SNAPSHOTTED"] } },
@@ -69,8 +57,8 @@ export async function getMarketView(id: string, now = new Date()) {
 
   return {
     issuanceId: id,
-    issuerName: issuance.issuerName,
-    symbol: issuance.symbol,
+    issuerName: terms.issuerName,
+    symbol: terms.symbol,
     chainMode: chain.mode,
     price: usdc(state.price),
     tokenMarketCap: { ...usdc(marketCap), label: COPY.marketCap },
@@ -104,7 +92,7 @@ export async function getMarketView(id: string, now = new Date()) {
         periodLabel: d.periodLabel,
         executedAt: d.executedAt,
         rightsPool: usdc(d.rightsPool),
-        perToken: usdc(perTokenBaseUnits(d.rightsPool, supplyBase, TOKEN_DECIMALS)),
+        perToken: usdc(perTokenBaseUnits(d.rightsPool, supplyBase, terms.tokenDecimals)),
         totalAllocated: d.totalAllocated === null ? null : usdc(d.totalAllocated),
       })),
     },
@@ -115,6 +103,8 @@ export async function getMarketView(id: string, now = new Date()) {
     },
     pendingDistributions: pending,
     nextRecordDate: issuance.nextRecordDate,
+    /** The period the next report is for; its label is what fundraise_report_period expects. */
+    nextPeriod: periodToReport(issuance.nextRecordDate, terms.distributionFrequency, now),
     distributionDue: issuance.nextRecordDate ? issuance.nextRecordDate.getTime() <= now.getTime() : false,
     economics: {
       label: COPY.illustrativeEconomics,
@@ -137,12 +127,10 @@ const KIND_LABEL = {
 } as const;
 
 export async function getHoldersView(id: string, isIssuer: boolean) {
-  const issuance = await getIssuanceOr404(id);
-  requireLive(issuance);
-  const [classified, participants] = await Promise.all([
-    getClassifiedHolders(id),
-    prisma.participant.findMany({ where: { issuanceId: id }, orderBy: { createdAt: "asc" } }),
-  ]);
+  const issuance = await loadIssuance(id);
+  requireMarket(issuance);
+  const participants = await prisma.participant.findMany({ where: { issuanceId: id }, orderBy: { createdAt: "asc" } });
+  const classified = await getClassifiedHolders(issuance, participants);
   const byId = new Map(participants.map((p) => [p.id, p]));
   const supply = classified.tokenSupply;
   const holders = [...classified.holders]
@@ -155,9 +143,8 @@ export async function getHoldersView(id: string, isIssuer: boolean) {
         label: KIND_LABEL[h.kind],
         displayName: isIssuer ? (p?.displayName ?? null) : undefined,
         participantId: h.participantId ?? null,
-        tokens: h.amount,
-        tokensDisplay: tokenDisplay(h.amount, TOKEN_DECIMALS),
-        pctOfSupply: pctDisplay(supply > 0n ? Number((h.amount * 10_000n) / supply) : 0),
+        tokens: tokenAmount(h.amount, issuance.terms.tokenDecimals),
+        pctOfSupply: pctOfSupply(h.amount, supply),
         flag: h.kind === "UNREGISTERED" ? "Holder is not a registered participant; counts as unallocated" : null,
       };
     });
@@ -165,7 +152,7 @@ export async function getHoldersView(id: string, isIssuer: boolean) {
 
   return {
     issuanceId: id,
-    symbol: issuance.symbol,
+    symbol: issuance.terms.symbol,
     slot: classified.slot,
     tokenSupply: supply,
     holders,
@@ -217,8 +204,8 @@ export function verifyAcceptanceSignature(wallet: string, message: string, signa
 }
 
 export async function registerParticipant(id: string, body: Record<string, unknown>) {
-  const issuance = await getIssuanceOr404(id);
-  const { baseMint } = requireLive(issuance);
+  const issuance = await loadIssuance(id);
+  const { baseMint } = requireMarket(issuance);
   const wallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
   const signature = typeof body.signature === "string" ? body.signature.trim() : "";
   const displayName = typeof body.displayName === "string" ? body.displayName.trim().slice(0, 64) || null : null;
@@ -226,12 +213,12 @@ export async function registerParticipant(id: string, body: Record<string, unkno
   if (!wallet || !signature) throw new HttpError(400, "invalid_input", "wallet and signature are required");
   if (body.verified !== true) throw new HttpError(400, "not_verified", "Identity verification (simulated) must be completed: verified: true");
   if (body.eligible !== true) throw new HttpError(400, "not_eligible", "Eligibility must be confirmed: eligible: true");
-  if (body.agreementHash !== issuance.agreementHash) {
+  if (body.agreementHash !== issuance.agreement.hash) {
     throw new HttpError(400, "agreement_mismatch", "agreementHash does not match this issuance's agreement", {
-      expected: issuance.agreementHash,
+      expected: issuance.agreement.hash,
     });
   }
-  const message = agreementAcceptanceMessage(issuance.agreementHash, issuance.id);
+  const message = agreementAcceptanceMessage(issuance.agreement.hash, issuance.id);
   if (!verifyAcceptanceSignature(wallet, message, signature)) {
     throw new HttpError(400, "invalid_signature", "Signature does not verify for this wallet and message", { message });
   }
@@ -296,19 +283,20 @@ function parseSide(v: unknown): "BUY" | "SELL" {
  * Pool fee is assumed quote-denominated (USDC), as Meteora DBC collects fees in quote.
  */
 export async function quoteView(id: string, sideRaw: unknown, amountIn: bigint) {
-  const issuance = await getIssuanceOr404(id);
-  const { dbcPool } = requireLive(issuance);
+  const issuance = await loadIssuance(id);
+  const { dbcPool } = requireMarket(issuance);
   const side = parseSide(sideRaw);
   if (amountIn <= 0n) throw new HttpError(400, "invalid_input", "amountIn must be > 0");
   const chain = await getChain();
   const q = await chain.market.quote(dbcPool, side, amountIn);
-  const m = monetizationOf(issuance);
+  const m = issuance.monetization;
+  const { symbol, tokenDecimals } = issuance.terms;
   // Meteora keeps its protocol share; only the remaining trading fee is split startup / Founder Stack.
   const tradingFee = q.poolFee - q.protocolFee;
   const fsFee = (tradingFee * BigInt(m.dbcTradingFees.partnerPct)) / 100n;
-  const token = (a: bigint) => ({ baseUnits: a, amount: formatUnits(a, TOKEN_DECIMALS), display: `${tokenDisplay(a, TOKEN_DECIMALS)} ${issuance.symbol}` });
-  const pay = side === "BUY" ? { asset: "USDC", ...usdc(q.amountIn) } : { asset: issuance.symbol, ...token(q.amountIn) };
-  const receive = side === "BUY" ? { asset: issuance.symbol, ...token(q.amountOut) } : { asset: "USDC", ...usdc(q.amountOut) };
+  const token = (a: bigint) => tokenAmount(a, tokenDecimals, symbol);
+  const pay = side === "BUY" ? { asset: "USDC", ...usdc(q.amountIn) } : { asset: symbol, ...token(q.amountIn) };
+  const receive = side === "BUY" ? { asset: symbol, ...token(q.amountOut) } : { asset: "USDC", ...usdc(q.amountOut) };
   return {
     side,
     dbcPool,
@@ -332,9 +320,8 @@ export async function swapView(id: string, body: Record<string, unknown>, amount
   const owner = typeof body.owner === "string" ? body.owner.trim() : "";
   if (!owner) throw new HttpError(400, "invalid_input", "owner (wallet address) is required");
   const quote = await quoteView(id, body.side, amountIn);
-  const issuance = await getIssuanceOr404(id);
   const chain = await getChain();
-  const { tx } = await chain.market.buildSwapTx(issuance.dbcPool!, owner, quote.side, amountIn, minAmountOut);
+  const { tx } = await chain.market.buildSwapTx(quote.dbcPool, owner, quote.side, amountIn, minAmountOut);
   const participant = await prisma.participant.findUnique({ where: { issuanceId_wallet: { issuanceId: id, wallet: owner } } });
   return {
     tx,

@@ -1,484 +1,188 @@
-// Distribution engine service (SPEC section 7): report -> snapshot -> allocations -> execute.
-// Route handlers stay thin and call these functions; each returns { status, body }.
+// Distribution lifecycle (SPEC section 7): report → snapshot → execute.
+//
+//   DRAFT ──snapshot──▶ SNAPSHOTTED ──execute──▶ EXECUTED
+//                        ▲      │ (re-snapshot allowed until a payout is recorded)
+//                        └──────┘
+//
+// Every transition is an atomic database claim, so the rules hold across API processes
+// (serverless), not just inside one: execute takes a lease on the row (`executingUntil`) and
+// only the lease holder pays; snapshot refuses to replace allocations while a lease is held.
+// Errors are HttpErrors (routes wrap them with handle()); response shapes live in ./distribution-views.
 // All money math lives in @fstack/core; this file does I/O (Prisma + chain ports) only.
 import {
   allocate,
   batchTransfers,
   computeRightsPool,
+  parsePeriodLabel,
+  periodLabelFormat,
+  periodToReport,
   perTokenBaseUnits,
-  perTokenDisplay,
+  recordDateAfter,
   reportHash,
-  yieldMetrics,
-  COPY,
-  DEFAULT_DCF_DEFINITION,
-  DEFAULT_TOKEN_DECIMALS,
-  type HolderBalance,
 } from "@fstack/core";
-import type { Allocation, Distribution, Issuance, Participant } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getChain } from "@/lib/chain";
 import { getClassifiedHolders } from "@/lib/server/holders";
-import { MoneyParseError, parseUsdc, pctOfSupply, tokensDisplay, usdc, usdcDisplay } from "./distribution-money";
+import { MoneyParseError, parseUsdc, usdc } from "./money";
+import {
+  distributionDetail,
+  distributionHistory,
+  encodeSnapshot,
+  executionLeaseHeld,
+  reportedPeriodView,
+  type DistributionWithAll,
+} from "./distribution-views";
+import { HttpError } from "./http";
+import { loadIssuance, toIssuanceRecord } from "./issuance-record";
 
-export type ServiceResult = { status: number; body: Record<string, unknown> };
-
-const ok = (body: Record<string, unknown>, status = 200): ServiceResult => ({ status, body });
-const fail = (status: number, error: string, message: string, extra: Record<string, unknown> = {}): ServiceResult => ({
-  status,
-  body: { error, message, ...extra },
-});
-
-const TOKEN_UNIT = 10n ** BigInt(DEFAULT_TOKEN_DECIMALS);
 const MAX_TRANSFERS_PER_TX = 10;
-
-export function periodsPerYear(frequency: string): number {
-  return frequency === "MONTHLY" ? 12 : 4;
-}
-
-/** Advances a record date by one period (quarter or month), in UTC. */
-export function advanceRecordDate(from: Date, frequency: string): Date {
-  const d = new Date(from.getTime());
-  d.setUTCMonth(d.getUTCMonth() + (frequency === "MONTHLY" ? 1 : 3));
-  return d;
-}
-
-export function explorerTxUrl(signature: string, mode: "fake" | "devnet"): string | null {
-  return mode === "fake" ? null : `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
-}
-
-/** Extracts the agreement's DCF definition (rendered by core renderAgreement), falling back to the default. */
-export function dcfDefinitionOf(agreementText: string): string {
-  const m = /\*\*Distributable Cash Flow \(DCF\)\*\* means, for each period: ([\s\S]*?) DCF is issuer-reported/.exec(
-    agreementText,
-  );
-  return m ? m[1].trim() : DEFAULT_DCF_DEFINITION;
-}
-
-function bpsToPct(bps: number): string {
-  return `${bps / 100}%`;
-}
-
-// ---------------------------------------------------------------- snapshot JSON
-
-interface StoredSnapshot {
-  slot: number;
-  takenAt: string;
-  tokenSupply: string;
-  holders: { owner: string; tokenAccount: string; amount: string; kind: string; participantId?: string }[];
-  excluded: { owner: string; kind: "POOL" | "UNREGISTERED"; tokens: string; retainedShare: string }[];
-  unallocatedBreakdown: { pool: string; unregistered: string; unsold: string; dust: string };
-  unregisteredCount: number;
-}
-
-function parseSnapshot(json: string | null): StoredSnapshot | null {
-  if (!json) return null;
-  try {
-    return JSON.parse(json) as StoredSnapshot;
-  } catch {
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------- shapes
-
-function summary(d: Distribution, issuance: Pick<Issuance, "tokenSupply">) {
-  const supplyBase = issuance.tokenSupply * TOKEN_UNIT;
-  return {
-    id: d.id,
-    issuanceId: d.issuanceId,
-    periodLabel: d.periodLabel,
-    status: d.status,
-    dcf: usdc(d.dcf),
-    dcfBaseUnits: d.dcf,
-    reportUrl: d.reportUrl,
-    reportHash: d.reportHash,
-    poolPercentageBps: d.poolPercentageBps,
-    poolPercentage: bpsToPct(d.poolPercentageBps),
-    rightsPool: usdc(d.rightsPool),
-    rightsPoolBaseUnits: d.rightsPool,
-    perToken: perTokenDisplay(d.rightsPool, supplyBase),
-    perTokenBaseUnits: d.perTokenBaseUnits,
-    snapshotSlot: d.snapshotSlot,
-    totalAllocated: d.totalAllocated === null ? null : usdc(d.totalAllocated),
-    totalAllocatedBaseUnits: d.totalAllocated,
-    unallocated: d.unallocated === null ? null : usdc(d.unallocated),
-    unallocatedBaseUnits: d.unallocated,
-    executedAt: d.executedAt,
-    createdAt: d.createdAt,
-  };
-}
-
-type DistributionWithAll = Distribution & {
-  issuance: Issuance & { participants: Participant[] };
-  allocations: Allocation[];
-};
+/**
+ * How long one execute holds the row. Longer than the execute route's maxDuration (60s), so a live
+ * executor never loses it; a crashed one frees the row once it expires. Renewed after every batch.
+ */
+export const EXECUTION_LEASE_MS = 120_000;
 
 async function loadDistribution(id: string): Promise<DistributionWithAll | null> {
-  return prisma.distribution.findUnique({
+  const row = await prisma.distribution.findUnique({
     where: { id },
     include: { issuance: { include: { participants: true } }, allocations: true },
   });
+  if (!row) return null;
+  const { issuance, ...distribution } = row;
+  return { ...distribution, issuance: toIssuanceRecord(issuance), participants: issuance.participants };
 }
 
-/** Signatures grouped by batch (one tx pays up to 10 holders). */
-function signaturesOf(allocs: Allocation[], mode: "fake" | "devnet") {
-  const bySig = new Map<string, { signature: string; wallets: string[]; amount: bigint }>();
-  for (const a of allocs) {
-    if (!a.txSignature) continue;
-    const e = bySig.get(a.txSignature) ?? { signature: a.txSignature, wallets: [], amount: 0n };
-    e.wallets.push(a.wallet);
-    e.amount += a.payout;
-    bySig.set(a.txSignature, e);
-  }
-  return [...bySig.values()].map((e) => ({
-    signature: e.signature,
-    explorerUrl: explorerTxUrl(e.signature, mode),
-    fake: mode === "fake",
-    wallets: e.wallets,
-    amount: usdc(e.amount),
-  }));
+async function loadOr404(id: string): Promise<DistributionWithAll> {
+  const d = await loadDistribution(id);
+  if (!d) throw new HttpError(404, "not_found", `distribution ${id} not found`);
+  return d;
 }
 
-/**
- * Full issuer-facing detail: summary + allocation table + excluded holders + unallocated
- * breakdown + live issuer balance check + confirmTotal. Used by snapshot, execute errors and GET.
- */
-async function buildDetail(d: DistributionWithAll, opts: { includeBalance: boolean }) {
-  const chain = await getChain();
-  const issuance = d.issuance;
-  const supplyBase = issuance.tokenSupply * TOKEN_UNIT;
-  const names = new Map(issuance.participants.map((p) => [p.id, p.displayName]));
-  const namesByWallet = new Map(issuance.participants.map((p) => [p.wallet, p.displayName]));
-  const snap = parseSnapshot(d.snapshotJson);
-
-  const allocs = [...d.allocations].sort((a, b) =>
-    a.payout === b.payout ? (a.wallet < b.wallet ? -1 : 1) : a.payout > b.payout ? -1 : 1,
-  );
-  const rows = allocs.map((a) => ({
-    wallet: a.wallet,
-    displayName: (a.participantId ? names.get(a.participantId) : namesByWallet.get(a.wallet)) ?? null,
-    participantId: a.participantId,
-    tokens: tokensDisplay(a.tokens),
-    tokensBaseUnits: a.tokens,
-    pctOfSupply: pctOfSupply(a.tokens, supplyBase),
-    payout: usdc(a.payout),
-    payoutDisplay: usdcDisplay(a.payout),
-    payoutBaseUnits: a.payout,
-    paid: Boolean(a.txSignature),
-    txSignature: a.txSignature,
-    explorerUrl: a.txSignature ? explorerTxUrl(a.txSignature, chain.mode) : null,
-  }));
-
-  const excluded = (snap?.excluded ?? []).map((e) => ({
-    wallet: e.owner,
-    kind: e.kind,
-    label: e.kind === "POOL" ? "Market (DBC pool)" : "Unregistered wallet",
-    tokens: tokensDisplay(BigInt(e.tokens)),
-    tokensBaseUnits: e.tokens,
-    pctOfSupply: pctOfSupply(BigInt(e.tokens), supplyBase),
-    retainedShare: usdc(BigInt(e.retainedShare)),
-  }));
-
-  const b = snap?.unallocatedBreakdown;
-  const unallocated =
-    d.unallocated === null || !b
-      ? null
-      : {
-          label: COPY.unallocated,
-          total: usdc(d.unallocated),
-          totalDisplay: usdcDisplay(d.unallocated),
-          breakdown: {
-            marketPool: usdc(BigInt(b.pool)),
-            unregistered: usdc(BigInt(b.unregistered)),
-            unsold: usdc(BigInt(b.unsold)),
-            roundingDust: usdc(BigInt(b.dust)),
-          },
-        };
-
-  const unpaid = d.allocations.filter((a) => a.payout > 0n && !a.txSignature);
-  const remaining = unpaid.reduce((s, a) => s + a.payout, 0n);
-
-  let balance: Record<string, unknown> | null = null;
-  if (opts.includeBalance && d.status !== "EXECUTED" && d.totalAllocated !== null) {
-    const bal = await chain.payout.getIssuerQuoteBalance();
-    const shortfall = remaining > bal ? remaining - bal : 0n;
-    balance = {
-      issuerAddress: chain.payout.issuerAddress(),
-      quoteMint: chain.payout.quoteMint(),
-      balance: usdc(bal),
-      balanceDisplay: usdcDisplay(bal),
-      required: usdc(remaining),
-      requiredDisplay: usdcDisplay(remaining),
-      sufficient: shortfall === 0n,
-      shortfall: usdc(shortfall),
-    };
-  }
-
-  const warnings: string[] = [];
-  if (snap && snap.unregisteredCount > 0) {
-    warnings.push(
-      `${snap.unregisteredCount} non-pool holder(s) are not registered participants; their share is unallocated (retained by issuer).`,
-    );
-  }
-
-  return {
-    chainMode: chain.mode,
-    distribution: summary(d, issuance),
-    issuance: {
-      id: issuance.id,
-      issuerName: issuance.issuerName,
-      symbol: issuance.symbol,
-      tokenSupply: issuance.tokenSupply,
-      poolPercentage: bpsToPct(issuance.poolPercentageBps),
-      distributionFrequency: issuance.distributionFrequency,
-      nextRecordDate: issuance.nextRecordDate,
-    },
-    snapshot: snap ? { slot: snap.slot, takenAt: snap.takenAt, tokenSupply: tokensDisplay(BigInt(snap.tokenSupply)) } : null,
-    rows,
-    excluded,
-    unallocated,
-    totals:
-      d.totalAllocated === null
-        ? null
-        : {
-            rightsPool: usdc(d.rightsPool),
-            totalAllocated: usdc(d.totalAllocated),
-            totalAllocatedDisplay: usdcDisplay(d.totalAllocated),
-            unallocated: d.unallocated === null ? null : usdc(d.unallocated),
-            perToken: perTokenDisplay(d.rightsPool, supplyBase),
-            payees: rows.filter((r) => r.payoutBaseUnits > 0n).length,
-            paid: rows.filter((r) => r.paid).length,
-            remainingToPay: usdc(remaining),
-          },
-    balance,
-    /** The exact string the founder must type back to execute (USDC decimal, not base units). */
-    confirmTotal: d.status === "SNAPSHOTTED" && d.totalAllocated !== null ? usdc(d.totalAllocated) : null,
-    signatures: signaturesOf(d.allocations, chain.mode),
-    warnings,
-  };
-}
+/** Prisma filter: no live execution lease on the row. */
+const leaseFree = (now: Date) => ({ OR: [{ executingUntil: null }, { executingUntil: { lt: now } }] });
 
 // ---------------------------------------------------------------- report period
 
-export async function reportPeriod(issuanceId: string, input: unknown): Promise<ServiceResult> {
+export async function reportPeriod(issuanceId: string, input: unknown) {
   const body = (input ?? {}) as { periodLabel?: unknown; dcf?: unknown; reportUrl?: unknown };
-  const periodLabel = typeof body.periodLabel === "string" ? body.periodLabel.trim() : "";
-  if (!periodLabel || periodLabel.length > 40) {
-    return fail(400, "invalid_period_label", "periodLabel is required (e.g. \"2026-Q3\"), max 40 chars");
-  }
+  const rawLabel = typeof body.periodLabel === "string" ? body.periodLabel.trim() : "";
+  if (!rawLabel) throw new HttpError(400, "invalid_period_label", 'periodLabel is required (e.g. "2026-Q3")');
   let dcf: bigint;
   try {
     dcf = parseUsdc(body.dcf);
   } catch (e) {
-    return fail(400, "invalid_dcf", e instanceof MoneyParseError ? e.message : "invalid dcf");
+    throw new HttpError(400, "invalid_dcf", e instanceof MoneyParseError ? e.message : "invalid dcf");
   }
   let reportUrl: string | undefined;
   if (body.reportUrl !== undefined && body.reportUrl !== null && body.reportUrl !== "") {
     if (typeof body.reportUrl !== "string" || !/^https?:\/\/\S+$/i.test(body.reportUrl)) {
-      return fail(400, "invalid_report_url", "reportUrl must be an http(s) URL");
+      throw new HttpError(400, "invalid_report_url", "reportUrl must be an http(s) URL");
     }
     reportUrl = body.reportUrl;
   }
 
-  const issuance = await prisma.issuance.findUnique({ where: { id: issuanceId } });
-  if (!issuance) return fail(404, "not_found", `issuance ${issuanceId} not found`);
+  const issuance = await loadIssuance(issuanceId);
+  const frequency = issuance.terms.distributionFrequency;
+  const period = parsePeriodLabel(rawLabel, frequency);
+  if (!period) {
+    throw new HttpError(400, "invalid_period_label", `periodLabel must be a ${frequency.toLowerCase()} period: ${periodLabelFormat(frequency)}`, {
+      nextPeriod: periodToReport(issuance.nextRecordDate, frequency, new Date()),
+    });
+  }
+  const periodLabel = period.label;
 
   const dup = await prisma.distribution.findUnique({
     where: { issuanceId_periodLabel: { issuanceId, periodLabel } },
   });
   if (dup) {
-    return fail(409, "duplicate_period", `period ${periodLabel} was already reported`, {
+    throw new HttpError(409, "duplicate_period", `period ${periodLabel} was already reported`, {
       distributionId: dup.id,
       status: dup.status,
     });
   }
   const open = await prisma.distribution.findFirst({ where: { issuanceId, status: { not: "EXECUTED" } } });
   if (open) {
-    return fail(409, "open_distribution_exists", `period ${open.periodLabel} is still ${open.status}; distribute it first`, {
+    throw new HttpError(409, "open_distribution_exists", `period ${open.periodLabel} is still ${open.status}; distribute it first`, {
       distributionId: open.id,
       periodLabel: open.periodLabel,
       status: open.status,
     });
   }
 
-  const rightsPool = computeRightsPool(dcf, issuance.poolPercentageBps);
-  const supplyBase = issuance.tokenSupply * TOKEN_UNIT;
-  const hash = reportHash({ issuanceId, periodLabel, dcf, reportUrl });
-
+  const { poolPercentageBps, tokenDecimals } = issuance.terms;
+  const rightsPool = computeRightsPool(dcf, poolPercentageBps);
   const d = await prisma.distribution.create({
     data: {
       issuanceId,
       periodLabel,
       dcf,
       reportUrl: reportUrl ?? null,
-      reportHash: hash,
-      poolPercentageBps: issuance.poolPercentageBps,
+      reportHash: reportHash({ issuanceId, periodLabel, dcf, reportUrl }),
+      poolPercentageBps,
       rightsPool,
-      perTokenBaseUnits: perTokenBaseUnits(rightsPool, supplyBase),
+      perTokenBaseUnits: perTokenBaseUnits(rightsPool, issuance.supplyBaseUnits, tokenDecimals),
       status: "DRAFT",
     },
   });
-
-  return ok(
-    {
-      distribution: summary(d, issuance),
-      issuance: {
-        id: issuance.id,
-        symbol: issuance.symbol,
-        tokenSupply: issuance.tokenSupply,
-        poolPercentage: bpsToPct(issuance.poolPercentageBps),
-      },
-      display: {
-        dcf: usdcDisplay(dcf),
-        rightsPool: usdcDisplay(rightsPool),
-        perToken: perTokenDisplay(rightsPool, supplyBase),
-      },
-      next: "Run fundraise_snapshot with this distributionId to preview allocations.",
-    },
-    201,
-  );
+  return reportedPeriodView(d, issuance);
 }
 
-// ---------------------------------------------------------------- history (public)
+// ---------------------------------------------------------------- reads
 
-export async function listDistributions(issuanceId: string): Promise<ServiceResult> {
-  const issuance = await prisma.issuance.findUnique({
-    where: { id: issuanceId },
-    include: {
-      participants: true,
-      distributions: { include: { allocations: true }, orderBy: { createdAt: "asc" } },
-    },
-  });
-  if (!issuance) return fail(404, "not_found", `issuance ${issuanceId} not found`);
+export async function listDistributions(issuanceId: string) {
+  const issuance = await loadIssuance(issuanceId);
+  const [participants, distributions] = await Promise.all([
+    prisma.participant.findMany({ where: { issuanceId } }),
+    prisma.distribution.findMany({ where: { issuanceId }, include: { allocations: true }, orderBy: { createdAt: "asc" } }),
+  ]);
 
   const chain = await getChain();
-  const supplyBase = issuance.tokenSupply * TOKEN_UNIT;
-  const names = new Map(issuance.participants.map((p) => [p.id, p.displayName]));
-
   let price: bigint | null = null;
-  if (issuance.dbcPool) {
+  if (issuance.market) {
     try {
-      price = (await chain.market.getMarketState(issuance.dbcPool)).price;
+      price = (await chain.market.getMarketState(issuance.market.dbcPool)).price;
     } catch {
       price = null;
     }
   }
-
-  const executed = issuance.distributions.filter((d) => d.status === "EXECUTED" && d.executedAt);
-  const ppy = periodsPerYear(issuance.distributionFrequency);
-  const m = yieldMetrics(
-    executed.map((d) => ({ periodLabel: d.periodLabel, executedAt: d.executedAt!, rightsPool: d.rightsPool, tokenSupply: supplyBase })),
-    price ?? 0n,
-    ppy,
-    new Date(),
-  );
-  const bpsStr = (b: number | null) => (b === null ? null : `${(b / 100).toFixed(2)}%`);
-
-  return ok({
-    issuance: {
-      id: issuance.id,
-      issuerName: issuance.issuerName,
-      symbol: issuance.symbol,
-      tokenSupply: issuance.tokenSupply,
-      poolPercentage: bpsToPct(issuance.poolPercentageBps),
-      poolPercentageBps: issuance.poolPercentageBps,
-      distributionFrequency: issuance.distributionFrequency,
-      nextRecordDate: issuance.nextRecordDate,
-      dcfDefinition: dcfDefinitionOf(issuance.agreementText),
-    },
-    distributions: issuance.distributions.map((d) => {
-      const paid = d.allocations.filter((a) => a.txSignature);
-      return {
-        ...summary(d, issuance),
-        allocations: {
-          count: d.allocations.length,
-          paidCount: paid.length,
-          rows: [...d.allocations]
-            .sort((a, b) => (a.payout === b.payout ? 0 : a.payout > b.payout ? -1 : 1))
-            .map((a) => ({
-              wallet: a.wallet,
-              displayName: a.participantId ? (names.get(a.participantId) ?? null) : null,
-              tokens: tokensDisplay(a.tokens),
-              pctOfSupply: pctOfSupply(a.tokens, supplyBase),
-              payout: usdc(a.payout),
-              txSignature: a.txSignature,
-            })),
-        },
-        signatures: signaturesOf(d.allocations, chain.mode),
-      };
-    }),
-    yield: {
-      label: COPY.trailingYield,
-      periods: executed.length,
-      annualizedNote: m.isAnnualized ? COPY.annualizedFromPeriods(m.periodsCounted) : null,
-      currentPrice: price === null ? null : usdc(price),
-      lastPerToken: usdc(m.lastPerToken),
-      ttmPerToken: usdc(m.ttmPerToken),
-      trailingYield: bpsStr(m.trailingYieldBps),
-      trailingYieldBps: m.trailingYieldBps,
-      annualizedRunRatePerToken: usdc(m.annualizedRunRatePerToken),
-      annualizedYield: bpsStr(m.annualizedYieldBps),
-      annualizedYieldBps: m.annualizedYieldBps,
-      isAnnualized: m.isAnnualized,
-    },
-    chainMode: chain.mode,
-  });
+  return distributionHistory(issuance, participants, distributions, price, chain.mode);
 }
 
-// ---------------------------------------------------------------- detail (issuer)
-
-export async function getDistribution(id: string): Promise<ServiceResult> {
-  const d = await loadDistribution(id);
-  if (!d) return fail(404, "not_found", `distribution ${id} not found`);
-  return ok(await buildDetail(d, { includeBalance: true }));
+export async function getDistribution(id: string) {
+  return distributionDetail(await loadOr404(id), { includeBalance: true });
 }
 
 // ---------------------------------------------------------------- snapshot
 
-export async function snapshotDistribution(id: string): Promise<ServiceResult> {
-  const d = await loadDistribution(id);
-  if (!d) return fail(404, "not_found", `distribution ${id} not found`);
-  if (d.status === "EXECUTED") return fail(409, "already_executed", "distribution is EXECUTED; its snapshot is immutable");
-  if (d.allocations.some((a) => a.txSignature)) {
-    return fail(409, "payout_in_progress", "some allocations are already paid; retry fundraise_execute_distribution instead of re-snapshotting");
-  }
-  if (executing.has(id)) return fail(409, "execution_in_progress", "execution is running for this distribution");
+export async function snapshotDistribution(id: string) {
+  const d = await loadOr404(id);
+  assertSnapshotAllowed(d);
 
-  const classified = await getClassifiedHolders(d.issuanceId);
+  const classified = await getClassifiedHolders(d.issuance, d.participants);
   const result = allocate(
     { slot: classified.slot, tokenSupply: classified.tokenSupply, holders: classified.holders },
     d.rightsPool,
   );
 
-  const stored: StoredSnapshot = {
-    slot: classified.slot,
-    takenAt: new Date().toISOString(),
-    tokenSupply: classified.tokenSupply.toString(),
-    holders: classified.holders.map((h: HolderBalance) => ({
-      owner: h.owner,
-      tokenAccount: h.tokenAccount,
-      amount: h.amount.toString(),
-      kind: h.kind,
-      ...(h.participantId ? { participantId: h.participantId } : {}),
-    })),
-    excluded: result.excluded.map((e) => ({
-      owner: e.owner,
-      kind: e.kind,
-      tokens: e.tokens.toString(),
-      retainedShare: e.retainedShare.toString(),
-    })),
-    unallocatedBreakdown: {
-      pool: result.unallocatedBreakdown.pool.toString(),
-      unregistered: result.unallocatedBreakdown.unregistered.toString(),
-      unsold: result.unallocatedBreakdown.unsold.toString(),
-      dust: result.unallocatedBreakdown.dust.toString(),
-    },
-    unregisteredCount: classified.unregisteredCount,
-  };
+  // Re-check inside the transaction: an execute may have claimed the row while holders were read.
+  await prisma.$transaction(async (tx) => {
+    const now = new Date();
+    const claimed = await tx.distribution.updateMany({
+      where: { id, status: { not: "EXECUTED" }, ...leaseFree(now) },
+      data: {
+        status: "SNAPSHOTTED",
+        snapshotSlot: BigInt(classified.slot),
+        snapshotJson: encodeSnapshot(classified, result, now),
+        totalAllocated: result.totalAllocated,
+        unallocated: result.unallocated,
+      },
+    });
+    // Checked after the write, under SQLite's write lock: no payout can land between here and commit.
+    assertSnapshotAllowed(await tx.distribution.findUniqueOrThrow({ where: { id }, include: { allocations: true } }), now);
+    if (claimed.count === 0) throw new HttpError(409, "execution_in_progress", "execution is running for this distribution");
 
-  await prisma.$transaction([
-    prisma.allocation.deleteMany({ where: { distributionId: id } }),
-    prisma.allocation.createMany({
+    await tx.allocation.deleteMany({ where: { distributionId: id } });
+    await tx.allocation.createMany({
       data: result.rows.map((r) => ({
         distributionId: id,
         wallet: r.owner,
@@ -486,74 +190,91 @@ export async function snapshotDistribution(id: string): Promise<ServiceResult> {
         tokens: r.tokens,
         payout: r.payout,
       })),
-    }),
-    prisma.distribution.update({
-      where: { id },
-      data: {
-        status: "SNAPSHOTTED",
-        snapshotSlot: BigInt(classified.slot),
-        snapshotJson: JSON.stringify(stored),
-        totalAllocated: result.totalAllocated,
-        unallocated: result.unallocated,
-      },
-    }),
-  ]);
-
-  const fresh = (await loadDistribution(id))!;
-  return ok({
-    ...(await buildDetail(fresh, { includeBalance: true })),
-    next: "Show this table, then ask the founder to type the exact confirmTotal before calling fundraise_execute_distribution.",
+    });
   });
+
+  return {
+    ...(await distributionDetail(await loadOr404(id), { includeBalance: true })),
+    next: "Show this table, then ask the founder to type the exact confirmTotal before calling fundraise_execute_distribution.",
+  };
+}
+
+function assertSnapshotAllowed(
+  d: { status: string; executingUntil: Date | null; allocations: { txSignature: string | null }[] },
+  now = new Date(),
+) {
+  if (d.status === "EXECUTED") throw new HttpError(409, "already_executed", "distribution is EXECUTED; its snapshot is immutable");
+  if (executionLeaseHeld(d, now)) throw new HttpError(409, "execution_in_progress", "execution is running for this distribution");
+  if (d.allocations.some((a) => a.txSignature)) {
+    throw new HttpError(409, "payout_in_progress", "some allocations are already paid; retry fundraise_execute_distribution instead of re-snapshotting");
+  }
 }
 
 // ---------------------------------------------------------------- execute
 
-/** In-process guard against concurrent executes of the same distribution (single API process). */
-const executing = new Set<string>();
-
-export async function executeDistribution(id: string, input: unknown): Promise<ServiceResult> {
+export async function executeDistribution(id: string, input: unknown) {
   const body = (input ?? {}) as { confirmTotal?: unknown };
   if (body.confirmTotal === undefined || body.confirmTotal === null || body.confirmTotal === "") {
-    return fail(400, "confirm_total_required", "confirmTotal is required: the founder must type the exact total (USDC) shown in the snapshot preview");
+    throw new HttpError(400, "confirm_total_required", "confirmTotal is required: the founder must type the exact total (USDC) shown in the snapshot preview");
   }
   let typed: bigint;
   try {
     typed = parseUsdc(body.confirmTotal);
   } catch (e) {
-    return fail(400, "invalid_confirm_total", e instanceof MoneyParseError ? e.message : "invalid confirmTotal");
+    throw new HttpError(400, "invalid_confirm_total", e instanceof MoneyParseError ? e.message : "invalid confirmTotal");
   }
 
-  if (executing.has(id)) return fail(409, "execution_in_progress", "execution is already running for this distribution");
-  executing.add(id);
+  const d = await loadOr404(id);
+  assertExecutable(d, typed);
+  if (d.status === "EXECUTED") return { ...(await distributionDetail(d, { includeBalance: false })), alreadyExecuted: true };
+
+  // Claim the row. `totalAllocated: typed` makes the claim fail if a re-snapshot changed the total
+  // after the founder confirmed it.
+  const lease: Lease = { until: new Date(Date.now() + EXECUTION_LEASE_MS) };
+  const claimed = await prisma.distribution.updateMany({
+    where: { id, status: "SNAPSHOTTED", totalAllocated: typed, ...leaseFree(new Date()) },
+    data: { executingUntil: lease.until },
+  });
+  if (claimed.count === 0) {
+    const current = await loadOr404(id);
+    assertExecutable(current, typed);
+    if (current.status === "EXECUTED") return { ...(await distributionDetail(current, { includeBalance: false })), alreadyExecuted: true };
+    throw new HttpError(409, "execution_in_progress", "execution is already running for this distribution");
+  }
+
   try {
-    return await executeLocked(id, typed);
+    return await payClaimed(id, lease);
   } finally {
-    executing.delete(id);
+    // Release our lease unless the row was executed (which clears it) or another executor took over.
+    await prisma.distribution.updateMany({ where: { id, executingUntil: lease.until }, data: { executingUntil: null } });
   }
 }
 
-async function executeLocked(id: string, typed: bigint): Promise<ServiceResult> {
-  const chain = await getChain();
-  const d = await loadDistribution(id);
-  if (!d) return fail(404, "not_found", `distribution ${id} not found`);
-  if (d.status === "DRAFT") return fail(409, "not_snapshotted", "take a snapshot first (fundraise_snapshot)");
-  if (d.totalAllocated === null) return fail(409, "not_snapshotted", "snapshot is missing");
-
+function assertExecutable(d: DistributionWithAll, typed: bigint) {
+  if (d.status === "DRAFT") throw new HttpError(409, "not_snapshotted", "take a snapshot first (fundraise_snapshot)");
+  if (d.totalAllocated === null) throw new HttpError(409, "not_snapshotted", "snapshot is missing");
   // Server-enforced gate (SPEC 0.3): the typed total must equal the snapshot's totalAllocated exactly.
   if (typed !== d.totalAllocated) {
-    return fail(
+    throw new HttpError(
       400,
       "confirm_total_mismatch",
       "confirmTotal does not match the snapshot total. Show the snapshot preview again and have the founder type the exact total.",
       { typed: usdc(typed) },
     );
   }
+  if (d.status !== "EXECUTED" && d.status !== "SNAPSHOTTED") throw new HttpError(409, "invalid_status", `distribution is ${d.status}`);
+}
 
-  if (d.status === "EXECUTED") {
-    return ok({ ...(await buildDetail(d, { includeBalance: false })), alreadyExecuted: true });
-  }
-  if (d.status !== "SNAPSHOTTED") return fail(409, "invalid_status", `distribution is ${d.status}`);
+/** The execution lease this process holds; `until` moves forward after every paid batch. */
+interface Lease {
+  until: Date;
+}
 
+/** Pays every unpaid allocation of a distribution this process holds the lease on, then marks it EXECUTED. */
+async function payClaimed(id: string, lease: Lease) {
+  const chain = await getChain();
+  // Re-read after the claim: a previous (expired) executor may have paid rows since we first loaded.
+  const d = await loadOr404(id);
   const unpaid = d.allocations
     .filter((a) => a.payout > 0n && !a.txSignature)
     .sort((a, b) => (a.payout === b.payout ? (a.wallet < b.wallet ? -1 : 1) : a.payout > b.payout ? -1 : 1));
@@ -561,7 +282,7 @@ async function executeLocked(id: string, typed: bigint): Promise<ServiceResult> 
 
   const bal = await chain.payout.getIssuerQuoteBalance();
   if (bal < remaining) {
-    return fail(409, "insufficient_balance", "issuer USDC balance is below the amount still to pay", {
+    throw new HttpError(409, "insufficient_balance", "issuer USDC balance is below the amount still to pay", {
       issuerAddress: chain.payout.issuerAddress(),
       quoteMint: chain.payout.quoteMint(),
       balance: usdc(bal),
@@ -578,8 +299,7 @@ async function executeLocked(id: string, typed: bigint): Promise<ServiceResult> 
     try {
       ({ signature } = await chain.payout.transferBatch(batch.map((a) => ({ wallet: a.wallet, amount: a.payout }))));
     } catch (e) {
-      const fresh = (await loadDistribution(id))!;
-      return fail(
+      throw new HttpError(
         502,
         "partial_execution",
         `transfer batch ${i + 1}/${batches.length} failed: ${e instanceof Error ? e.message : String(e)}. ` +
@@ -588,7 +308,7 @@ async function executeLocked(id: string, typed: bigint): Promise<ServiceResult> 
           batchesCompleted: i,
           batchesTotal: batches.length,
           newSignatures,
-          detail: await buildDetail(fresh, { includeBalance: true }),
+          detail: await distributionDetail(await loadOr404(id), { includeBalance: true }),
         },
       );
     }
@@ -598,19 +318,30 @@ async function executeLocked(id: string, typed: bigint): Promise<ServiceResult> 
       where: { id: { in: batch.map((a) => a.id) }, txSignature: null },
       data: { txSignature: signature },
     });
+    const next = new Date(Date.now() + EXECUTION_LEASE_MS);
+    const renewed = await prisma.distribution.updateMany({ where: { id, executingUntil: lease.until }, data: { executingUntil: next } });
+    if (renewed.count === 0) {
+      throw new HttpError(409, "execution_in_progress", "lost the execution lease; another execution took over this distribution", {
+        batchesCompleted: i + 1,
+        batchesTotal: batches.length,
+        newSignatures,
+      });
+    }
+    lease.until = next;
   }
 
   const executedAt = new Date();
-  // One period forward from the current record date (or from now if none was set).
-  const nextRecordDate = advanceRecordDate(d.issuance.nextRecordDate ?? executedAt, d.issuance.distributionFrequency);
+  const frequency = d.issuance.terms.distributionFrequency;
+  // The record date of the period after the one just paid (labels from before canonical labels fall back to the current period).
+  const paidPeriod = parsePeriodLabel(d.periodLabel, frequency) ?? periodToReport(d.issuance.nextRecordDate, frequency, executedAt);
+  const nextRecordDate = recordDateAfter(paidPeriod, d.issuance.nextRecordDate);
   await prisma.$transaction([
-    prisma.distribution.update({ where: { id }, data: { status: "EXECUTED", executedAt } }),
+    prisma.distribution.update({ where: { id }, data: { status: "EXECUTED", executedAt, executingUntil: null } }),
     prisma.issuance.update({ where: { id: d.issuanceId }, data: { nextRecordDate } }),
   ]);
 
-  const fresh = (await loadDistribution(id))!;
-  return ok({
-    ...(await buildDetail(fresh, { includeBalance: false })),
+  return {
+    ...(await distributionDetail(await loadOr404(id), { includeBalance: false })),
     alreadyExecuted: false,
     newSignatures,
     nextRecordDate,
@@ -618,5 +349,5 @@ async function executeLocked(id: string, typed: bigint): Promise<ServiceResult> 
       chain.mode === "fake"
         ? "CHAIN_MODE=fake: signatures are simulated, nothing moved on devnet."
         : "Holders can see this distribution on the market page.",
-  });
+  };
 }

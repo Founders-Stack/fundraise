@@ -17,6 +17,7 @@ model Issuance {
   rightsType            String   @default("CASH_FLOW") // CASH_FLOW | VENTURE_EXIT (future)
   poolPercentageBps     Int      // basis points of DCF, e.g. 1000 = 10%
   tokenSupply           BigInt   // whole tokens, e.g. 1_000_000
+  tokenDecimals         Int      @default(6)
   symbol                String
   name                  String
   distributionFrequency String   @default("QUARTERLY") // QUARTERLY | MONTHLY
@@ -30,6 +31,10 @@ model Issuance {
   agreementVersion      String
   agreementHash         String
   agreementText         String
+  // launch terms rendered into the agreement; NULL = core default (read through lib/server/issuance-record.ts)
+  issuerJurisdiction    String?
+  dcfDefinition         String?
+  recordDateRule        String?
 
   // derived, stored
   startingMarketCap     BigInt   // USDC base units
@@ -37,7 +42,7 @@ model Issuance {
 
   quoteMint             String?
   baseMint              String?
-  dbcConfig             String?  // JSON: DBC config pubkey + params
+  dbcConfig             String?  // JSON: { address, poolOwners, dbcParams, signatures, chainMode }
   dbcPool               String?
   dammPool              String?
   monetization          String   // JSON: MonetizationConfig
@@ -83,6 +88,7 @@ model Distribution {
   totalAllocated BigInt?   // USDC base units
   unallocated    BigInt?   // USDC base units
   executedAt     DateTime?
+  executingUntil DateTime? // execution lease: set atomically by execute, cleared when it finishes
   createdAt      DateTime  @default(now())
 
   allocations Allocation[]

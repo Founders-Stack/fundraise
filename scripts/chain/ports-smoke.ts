@@ -1,6 +1,6 @@
 // End-to-end smoke of createDevnetPorts() on devnet:
 // create pool -> allow alice -> quote + buildSwapTx (alice signs) -> carol NotEligible -> market state
-// -> getHolders -> payout 1 USDC to alice.     scripts/chain/run.sh ports-smoke.ts
+// -> getBalances -> payout 1 USDC to alice.     scripts/chain/run.sh ports-smoke.ts
 import { createDevnetPorts } from "../../apps/web/lib/chain/real";
 import {
   ACME_DEMO_TERMS,
@@ -84,8 +84,8 @@ async function main() {
   console.log("marketState(after buy)", j(m1));
 
   t = Date.now();
-  const h = await ports.registry.getHolders(pool.baseMint, pool.poolOwners);
-  console.log(`getHolders ${Date.now() - t}ms`, j(h));
+  const h = await ports.registry.getBalances(pool.baseMint, pool.poolOwners);
+  console.log(`getBalances ${Date.now() - t}ms`, j(h));
 
   const before = await tokenBalance(env.connection, usdcAta(env.quoteMint, alice.publicKey));
   const issuerBal = await ports.payout.getIssuerQuoteBalance();

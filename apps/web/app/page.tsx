@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { prisma } from "@/lib/db";
+import { listIssuances } from "@/lib/server/issuance-record";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const issuances = await prisma.issuance.findMany({ orderBy: { createdAt: "desc" } });
+  const issuances = (await listIssuances()).map(({ record }) => record);
 
   return (
     <div className="space-y-8">
@@ -38,9 +38,9 @@ export default async function Home() {
               <TableBody>
                 {issuances.map((i) => (
                   <TableRow key={i.id}>
-                    <TableCell>{i.issuerName}</TableCell>
-                    <TableCell>{i.symbol}</TableCell>
-                    <TableCell>{(i.poolPercentageBps / 100).toFixed(1)}% of DCF</TableCell>
+                    <TableCell>{i.terms.issuerName}</TableCell>
+                    <TableCell>{i.terms.symbol}</TableCell>
+                    <TableCell>{(i.terms.poolPercentageBps / 100).toFixed(1)}% of DCF</TableCell>
                     <TableCell className="text-right">
                       <Link className="underline" href={`/market/${i.id}`}>Market</Link>
                     </TableCell>

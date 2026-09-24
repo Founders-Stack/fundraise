@@ -3,7 +3,7 @@
 // Two implementations: `fake.ts` (CHAIN_MODE=fake, local dev + tests) and
 // `real.ts` (CHAIN_MODE=devnet, Meteora DBC + Token-2022 + fs_allowlist).
 // All amounts are bigint base units (USDC 6 dp, rights token 6 dp).
-import type { DbcFeeParams, HolderBalance } from "@fstack/core";
+import type { DbcFeeParams, TokenBalance } from "@fstack/core";
 
 export interface CreatePoolInput {
   name: string;
@@ -77,11 +77,11 @@ export interface RegistryPort {
   /** Adds an AllowEntry for (mint, wallet). Idempotent. */
   allowWallet(mint: string, wallet: string): Promise<{ signature: string }>;
   /**
-   * All token accounts of the mint with non-zero balance, merged by owner.
-   * `kind` is POOL for `poolOwners`, otherwise UNREGISTERED — the API
-   * upgrades matches against Participant rows to PARTICIPANT.
+   * All token accounts of the mint with non-zero balance, merged by owner. Raw balances only:
+   * who counts as pool / participant is decided by core `classifyHolders`, not here.
+   * `extraOwners` must be included even if the adapter can't discover them (e.g. pool vault owners).
    */
-  getHolders(mint: string, poolOwners: string[]): Promise<{ slot: number; holders: HolderBalance[] }>;
+  getBalances(mint: string, extraOwners: string[]): Promise<{ slot: number; balances: TokenBalance[] }>;
 }
 
 export interface PayoutPort {

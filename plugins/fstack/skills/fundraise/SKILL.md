@@ -31,8 +31,8 @@ If it returns an error, stop and explain. Do not retry or work around it:
     `<periodLabel>` is in progress. Show the status (Step 3), then hand off to the `fundraise-distribute`
     skill (`/fstack:fundraise-distribute`, `$fstack-fundraise-distribute`), which uses
     `fundraise_snapshot` and `fundraise_execute_distribution`.
-  - `distributionDue: true` (the record date `nextRecordDate` has passed) → the period is due. Show the
-    status, then hand off to the `fundraise-report` skill (`/fstack:fundraise-report`,
+  - `distributionDue: true` (the record date `nextRecordDate` has passed) → period `nextPeriod.label` is
+    due. Show the status, then hand off to the `fundraise-report` skill (`/fstack:fundraise-report`,
     `$fstack-fundraise-report`) to report its Distributable Cash Flow (`fundraise_report_period`).
   - Otherwise → show the status (Step 3). For past distributions the founder can ask for details
     (`fundraise_list_distributions`, `fundraise_get_distribution`, both read-only).
@@ -51,7 +51,7 @@ Print exactly the API values (`display` strings):
 | Graduation progress | `progress.bar` (`progress.quoteReserve.display` of `progress.migrationQuoteThreshold.display`) |
 | Holders | `holders.count` (`holders.participants` registered; flag `holders.unregistered` if > 0) |
 | Distribution yield | `yield.trailingYield` trailing, `yield.annualizedYield` annualized (`yield.annualizedNote`), or "No distributions yet" when `yield.periodsExecuted` is 0 |
-| Next record date | `nextRecordDate` (date only) |
+| Next record date | `nextRecordDate` (date only), for period `nextPeriod.label` |
 | Accrued trading fees | Startup `accruedTradingFees.startup.display`, Founder Stack `accruedTradingFees.founderStack.display` |
 | Market | `marketUrl` |
 

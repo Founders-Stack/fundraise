@@ -2,42 +2,14 @@ import { describe, expect, it } from "vitest";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
 import { POST as previewPOST } from "@/app/api/issuances/preview/route";
-import { GET as listGET, POST as createPOST } from "@/app/api/issuances/route";
+import { GET as listGET } from "@/app/api/issuances/route";
 import { GET as issuanceGET } from "@/app/api/issuances/[id]/route";
 import { GET as marketGET } from "@/app/api/issuances/[id]/market/route";
 import { GET as holdersGET } from "@/app/api/issuances/[id]/holders/route";
 import { POST as participantsPOST } from "@/app/api/issuances/[id]/participants/route";
 import { GET as quoteGET } from "@/app/api/issuances/[id]/quote/route";
 import { agreementAcceptanceMessage } from "@/lib/server/agreement-message";
-
-const AUTH = { authorization: "Bearer test-token", "content-type": "application/json" };
-const ACME = {
-  issuerName: "Acme SaaS",
-  symbol: "ACME",
-  poolPercentageBps: 1000,
-  expectedAnnualDcf: "1600000",
-  targetInitialYieldBps: 1600,
-  distributionFrequency: "QUARTERLY",
-};
-
-const post = (body: unknown, headers: Record<string, string> = AUTH) =>
-  new Request("http://test/api", { method: "POST", headers, body: JSON.stringify(body) });
-const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
-
-async function preview(body: unknown = ACME) {
-  const res = await previewPOST(post(body));
-  return { status: res.status, body: await res.json() };
-}
-async function create(previewId: unknown) {
-  const res = await createPOST(post({ previewId }));
-  return { status: res.status, body: await res.json() };
-}
-async function launch() {
-  const p = await preview();
-  const c = await create(p.body.previewId);
-  expect(c.status).toBe(201);
-  return c.body as { issuanceId: string; agreementHash: string };
-}
+import { ACME, AUTH, create, ctx, launch, post, preview } from "./helpers";
 
 describe("preview", () => {
   it("derives pricing from cash flow (Acme: $1.6M DCF, 10%, 16% → $1 / token)", async () => {
@@ -113,6 +85,22 @@ describe("create gate", () => {
     const list = await (await listGET(new Request("http://test", { headers: AUTH }))).json();
     expect(list.issuances.some((i: { id: string }) => i.id === issuanceId)).toBe(true);
   });
+
+  it("keeps the launch terms on the issuance (detail and list agree)", async () => {
+    const { issuanceId } = await launch({ symbol: "WYO", issuerJurisdiction: "Wyoming, USA" });
+    const body = await (await issuanceGET(new Request("http://test"), ctx(issuanceId))).json();
+    expect(body.terms.issuerJurisdiction).toBe("Wyoming, USA");
+    expect(body.terms.tokenDecimals).toBe(6);
+    expect(body.agreement.text).toContain("Wyoming, USA");
+    expect(body.fees.mode).toBe("DEMO_PROTOCOL");
+    expect(body.chain.poolOwners.length).toBeGreaterThan(0);
+
+    const list = await (await listGET(new Request("http://test", { headers: AUTH }))).json();
+    const listed = list.issuances.find((i: { id: string }) => i.id === issuanceId);
+    expect(listed.terms).toEqual(body.terms);
+    expect(listed.dcfDefinition).toBe(body.dcfDefinition);
+    expect(listed.agreement.text).toBeUndefined();
+  });
 });
 
 describe("participants", () => {
@@ -145,6 +133,8 @@ describe("participants", () => {
     const iss = await (await holdersGET(new Request("http://test", { headers: AUTH }), ctx(issuanceId))).json();
     expect(iss.participants[0].displayName).toBe("Alice");
     expect(iss.holders[0].kind).toBe("POOL");
+    expect(iss.holders[0].tokens).toEqual({ baseUnits: "1000000000000", amount: "1000000", display: "1,000,000" });
+    expect(iss.holders[0].pctOfSupply).toBe("100%");
   });
 
   it("rejects a signature over the wrong message or by another key", async () => {
