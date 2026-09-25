@@ -18,6 +18,7 @@ import { HttpError, appUrl, parseBaseUnits } from "./http";
 import { loadIssuance, onboardUrl, requireMarket, type IssuanceRecord } from "./issuance-record";
 import { formatUnits, pctDisplay, pctOfSupply, tokenAmount, usdc } from "./money";
 import { ELIGIBILITY_STATEMENT, agreementAcceptanceMessage } from "./agreement-message";
+import { kycEnabled, kycTransaction, kycWalletView, requestKycProof, requireKycAllowed } from "./kyc";
 
 export function progressBar(bps: number, width = 20): string {
   const clamped = Math.max(0, Math.min(10_000, bps));
@@ -228,7 +229,17 @@ export async function registerParticipant(id: string, body: Record<string, unkno
   const displayName = typeof body.displayName === "string" ? body.displayName.trim().slice(0, 64) || null : null;
 
   if (!wallet || !signature) throw new HttpError(400, "invalid_input", "wallet and signature are required");
-  if (!inviteMatches(issuance, body.invite)) {
+  // ZK-KYC path: the wallet already proved (Rarimo ZK passport) and self-allowlisted on-chain, so the
+  // issuer's invite code is not needed; the on-chain AllowEntry + attestation are the gate.
+  let kycTx: string | null = null;
+  if (body.kyc === true) {
+    if (!kycEnabled()) throw new HttpError(400, "kyc_unavailable", "ZK KYC onboarding is not available");
+    const given = typeof body.kycTx === "string" ? body.kycTx.trim() : "";
+    if (given && !/^[1-9A-HJ-NP-Za-km-z]{80,90}$/.test(given)) throw new HttpError(400, "invalid_input", "kycTx must be a transaction signature");
+    kycTx = given || (await requireKycAllowed(baseMint, wallet));
+    if (given) await requireKycAllowed(baseMint, wallet);
+    if (!kycTx) throw new HttpError(409, "kyc_not_completed", "Complete the ZK passport verification first");
+  } else if (!inviteMatches(issuance, body.invite)) {
     throw new HttpError(403, "invalid_invite", "This is a closed pilot: onboarding needs the invite link from the issuer");
   }
   if (body.eligible !== true) throw new HttpError(400, "not_eligible", `Tick "${ELIGIBILITY_STATEMENT}": eligible: true`);
@@ -264,6 +275,9 @@ export async function registerParticipant(id: string, body: Record<string, unkno
     },
   });
 
+  if (!participant.allowlistTx && kycTx !== null) {
+    participant = await prisma.participant.update({ where: { id: participant.id }, data: { allowlistTx: kycTx } });
+  }
   if (!participant.allowlistTx) {
     const chain = await getChain();
     try {
@@ -288,6 +302,22 @@ export async function registerParticipant(id: string, body: Record<string, unkno
     },
     marketUrl: `${appUrl()}/market/${id}`,
   };
+}
+
+/** POST /api/issuances/:id/kyc — start a Rarimo ZK passport proof request for `wallet`. */
+export async function startKycProof(id: string, body: Record<string, unknown>) {
+  const issuance = await loadIssuance(id);
+  requireMarket(issuance);
+  const wallet = typeof body.wallet === "string" ? body.wallet.trim() : "";
+  if (!wallet) throw new HttpError(400, "invalid_input", "wallet is required");
+  return requestKycProof(wallet);
+}
+
+/** GET /api/issuances/:id/kyc?wallet= — poll: { status: "pending" } or the unsigned tx to sign. */
+export async function pollKycProof(id: string, walletRaw: string) {
+  const issuance = await loadIssuance(id);
+  const { baseMint } = requireMarket(issuance);
+  return kycTransaction(baseMint, walletRaw.trim());
 }
 
 /** Covers the swap network fee plus rent for the new token accounts a first buy creates. */
@@ -327,6 +357,8 @@ export async function walletView(id: string, walletRaw: string) {
         }
       : null,
     inviteRequired: issuance.inviteCode !== null,
+    /** ZK passport (Rarimo) onboarding: { available: false } unless this deployment + mint support it. */
+    kyc: await kycWalletView(baseMint, wallet).catch(() => ({ available: false as const })),
     funds: {
       simulated: chain.mode === "fake",
       sol: { lamports: funds.lamports, display: `${formatUnits(funds.lamports, 9)} SOL` },

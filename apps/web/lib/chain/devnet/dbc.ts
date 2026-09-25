@@ -40,8 +40,22 @@ import { agreementMemo, type DbcFeeParams } from "@fstack/core";
 import { COMMITMENT, computeBudgetIxs, sendTx, type DevnetEnv } from "./env";
 import { memoInstruction } from "./usdc";
 import { addAllowIx, hookAccounts, initializeIx } from "./allowlist";
+import { enableKycIx } from "./kyc";
 
 export const DBC_POOL_AUTHORITY = deriveDbcPoolAuthority();
+
+/**
+ * ZK-KYC (Rarimo ZK passport): opt a freshly created mint in to KYC self-onboarding (fs_allowlist
+ * `enable_kyc`, signed by the mint's allowlist admin = FS authority). Only when KYC_ENABLED=1, i.e. the
+ * cluster runs the upgraded program with a kyc-config. Separate tx: it does not fit next to pool creation.
+ */
+async function maybeEnableKyc(env: DevnetEnv, baseMint: PublicKey): Promise<string | null> {
+  if (process.env.KYC_ENABLED !== "1") return null;
+  const { connection, fsAuthority, allowlistProgram } = env;
+  const t = new Transaction().add(...computeBudgetIxs(100_000), await enableKycIx({ program: allowlistProgram, admin: fsAuthority.publicKey, mint: baseMint }));
+  t.feePayer = fsAuthority.publicKey;
+  return sendTx(connection, t, [fsAuthority], "fs_allowlist.enable_kyc");
+}
 
 export interface CurveInput {
   tokenSupply: bigint; // whole tokens
@@ -260,12 +274,14 @@ export async function createHookPool(
     "createPoolWithTransferHook+fs_allowlist.initialize+add_allow(pool authority)",
   );
 
+  const sigKyc = await maybeEnableKyc(env, baseMintKp.publicKey);
+
   const pool = deriveDbcPoolAddress(quoteMint, baseMintKp.publicKey, configKp.publicKey);
   return {
     baseMint: baseMintKp.publicKey,
     config: configKp.publicKey,
     pool,
-    signatures: [sig1, sig2],
+    signatures: sigKyc ? [sig1, sig2, sigKyc] : [sig1, sig2],
     dbcParams: describeConfig(params, config),
     agreementMemo: memo,
   };
@@ -346,7 +362,9 @@ export async function initHookAllowlist(env: DevnetEnv, baseMint: PublicKey): Pr
     addAllowIx({ program: allowlistProgram, admin: fsAuthority.publicKey, mint: baseMint, wallet: DBC_POOL_AUTHORITY }),
   );
   t2.feePayer = fsAuthority.publicKey;
-  return sendTx(connection, t2, [fsAuthority], "fs_allowlist.initialize+add_allow(pool authority)");
+  const sig = await sendTx(connection, t2, [fsAuthority], "fs_allowlist.initialize+add_allow(pool authority)");
+  await maybeEnableKyc(env, baseMint);
+  return sig;
 }
 
 /** PoolService whose transfer-hook account resolution uses our explicit fs_allowlist accounts. */

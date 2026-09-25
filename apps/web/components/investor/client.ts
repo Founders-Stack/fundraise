@@ -43,6 +43,14 @@ export interface WalletStatus {
   registered: boolean;
   participant: { agreementAcceptedAt: string | null; verification: string; allowlistTx: string | null } | null;
   inviteRequired: boolean;
+  /** ZK passport onboarding (Rarimo). `available` only when this deployment + mint support it. */
+  kyc?: {
+    available: boolean;
+    minAge?: number;
+    blocked?: string[];
+    attested?: { citizenship: string; expiresAt: string } | null;
+    allowlisted?: boolean;
+  };
   funds: { simulated: boolean; sol: { lamports: string; display: string }; usdc: Usdc; units: Units };
   preflight: { hasSol: boolean; hasUsdc: boolean; minSol: string; ready: boolean };
   message: string;
