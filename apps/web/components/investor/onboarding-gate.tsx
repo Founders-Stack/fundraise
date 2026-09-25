@@ -16,6 +16,7 @@ import { TxLink } from "@/components/explorer-link";
 import { shortAddr } from "@/components/format";
 import { ELIGIBILITY_STATEMENT, agreementAcceptanceMessage } from "@/lib/server/agreement-message";
 import { api, announceMarketChange, isUserRejection, useInvite, useWalletStatus, type WalletStatus } from "./client";
+import { ZkKycPanel } from "./zk-kyc-panel";
 
 export interface GateAgreement {
   hash: string;
@@ -50,6 +51,10 @@ export function OnboardingGate(props: OnboardingGateProps) {
   const [showFull, setShowFull] = useState(false);
   const [busy, setBusy] = useState<null | "sign" | "register">(null);
   const [error, setError] = useState<{ code: string; message: string } | null>(null);
+  // ZK passport path (Rarimo): when the market accepts it, on-chain KYC replaces the invite code.
+  const [kycDone, setKycDone] = useState<{ tx: string | null } | null>(null);
+  const kycMode = Boolean(status?.kyc?.available);
+  const kycReady = Boolean(kycDone) || Boolean(status?.kyc?.allowlisted);
   const [enabledFor, setEnabled] = useState<{ wallet: string; allowlistTx: string | null } | null>(null);
   // Only counts for the wallet that just signed: switching wallets must not carry "Trading enabled" over.
   const enabled = enabledFor && enabledFor.wallet === wallet ? enabledFor : null;
@@ -57,7 +62,7 @@ export function OnboardingGate(props: OnboardingGateProps) {
   const registered = Boolean(enabled) || Boolean(status?.registered);
   const step = !wallet ? 0 : registered ? 2 : 1;
   const inviteMissing = Boolean(status?.inviteRequired) && invite.trim() === "";
-  const canSign = Boolean(wallet && status && checked && !inviteMissing && !busy);
+  const canSign = Boolean(wallet && status && checked && !busy && (kycMode ? kycReady : !inviteMissing));
 
   async function acceptAndSign() {
     if (!wallet || !status) return;
@@ -84,7 +89,13 @@ export function OnboardingGate(props: OnboardingGateProps) {
       setBusy("register");
       const res = await api<{ participant: { allowlistTx: string | null } }>(`/api/issuances/${issuanceId}/participants`, {
         method: "POST",
-        body: { wallet, eligible: true, agreementHash: agreement.hash, signature, invite: invite.trim() || undefined },
+        body: {
+          wallet,
+          eligible: true,
+          agreementHash: agreement.hash,
+          signature,
+          ...(kycMode ? { kyc: true, kycTx: kycDone?.tx ?? undefined } : { invite: invite.trim() || undefined }),
+        },
       });
       setEnabled({ wallet, allowlistTx: res.participant.allowlistTx });
       announceMarketChange();
@@ -157,7 +168,17 @@ export function OnboardingGate(props: OnboardingGateProps) {
         <div className="space-y-4">
           <Preflight status={status} />
 
-          {status.inviteRequired && (editingInvite || inviteMissing || error?.code === "invalid_invite") && (
+          {kycMode && status.kyc && (
+            <ZkKycPanel
+              issuanceId={issuanceId}
+              wallet={wallet}
+              kyc={status.kyc}
+              onDone={(tx) => setKycDone({ tx })}
+              onError={(e) => setError(e.message ? e : null)}
+            />
+          )}
+
+          {!kycMode && status.inviteRequired && (editingInvite || inviteMissing || error?.code === "invalid_invite") && (
             <label className="block space-y-1.5">
               <span className="label-mono">Invite code</span>
               <input
