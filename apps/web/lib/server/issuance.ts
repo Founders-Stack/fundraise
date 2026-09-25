@@ -18,6 +18,7 @@ import {
   type DistributionFrequency,
   type MonetizationConfig,
 } from "@fstack/core";
+import { canManage, type Principal } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getChain, type CreatePoolInput, type WalletPool } from "@/lib/chain";
 import { HttpError, appUrl } from "./http";
@@ -258,13 +259,14 @@ export function buildPreview(input: PreviewInput, now = new Date()) {
   };
 }
 
-export async function createPreview(body: Record<string, unknown>) {
+export async function createPreview(body: Record<string, unknown>, ownerWallet: string | null = null) {
   const input = parsePreviewInput(body);
   const preview = buildPreview(input);
   const row = await prisma.issuancePreview.create({
     data: {
       termsJson: serializeTerms(input),
       derivedJson: JSON.stringify(preview, (_k, v) => (typeof v === "bigint" ? v.toString() : v)),
+      ownerWallet,
     },
   });
   return {
@@ -281,12 +283,16 @@ export async function createPreview(body: Record<string, unknown>) {
  * Step 1 (fast, DB only): claims the preview atomically and inserts a pending Issuance row
  * (baseMint = null). Split from step 2 so creation can move to a background job (H10).
  */
-export async function startIssuanceCreation(previewId: unknown) {
+export async function startIssuanceCreation(previewId: unknown, principal: Principal = { kind: "admin" }) {
   if (typeof previewId !== "string" || previewId.trim() === "") {
     throw new HttpError(400, "preview_required", "previewId is required: call POST /api/issuances/preview first");
   }
   const preview = await prisma.issuancePreview.findUnique({ where: { id: previewId } });
   if (!preview) throw new HttpError(400, "preview_not_found", `No preview ${previewId}: call POST /api/issuances/preview first`);
+  // A wallet key may only use its own previews (admin may use any).
+  if (!canManage(principal, preview.ownerWallet)) {
+    throw new HttpError(403, "not_owner", "This preview was made by a different wallet");
+  }
   if (preview.usedAt) {
     throw new HttpError(409, "preview_already_used", `Preview ${previewId} was already used`, { issuanceId: preview.issuanceId });
   }
@@ -309,6 +315,7 @@ export async function startIssuanceCreation(previewId: unknown) {
       agreement: { hash: agreementHash(agreementText), text: agreementText },
       monetization,
       nextRecordDate: periodContaining(new Date(), terms.distributionFrequency).recordDate,
+      ownerWallet: preview.ownerWallet,
     });
     await prisma.issuancePreview.update({ where: { id: previewId }, data: { issuanceId: issuance.id } });
     return issuance;
@@ -364,9 +371,12 @@ function poolInput(issuance: IssuanceRecord): CreatePoolInput {
  * POST /api/issuances. Custody mode (default) creates the market now with server keys; wallet mode
  * (SPEC 0.4 P1) leaves the issuance PENDING and returns a signUrl for the founder's wallet.
  */
-export async function createIssuance(previewId: unknown, opts: { signingMode?: unknown } = {}) {
+export async function createIssuance(
+  previewId: unknown,
+  opts: { signingMode?: unknown; principal?: Principal } = {},
+) {
   const mode = signingMode(opts.signingMode);
-  const pending = await startIssuanceCreation(previewId);
+  const pending = await startIssuanceCreation(previewId, opts.principal);
   if (mode === "wallet") return requestIssuanceSignature(pending);
   const done = await completeIssuanceCreation(pending, previewId as string);
   return liveIssuanceResult(done, COPY.demoCustody);

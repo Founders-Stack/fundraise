@@ -60,6 +60,8 @@ export interface IssuanceRecord {
   /** terms.tokenSupply in base units (× 10^tokenDecimals). */
   supplyBaseUnits: bigint;
   market: IssuanceMarket | null;
+  /** Wallet that owns (may manage) this issuance; null = admin-owned. */
+  ownerWallet: string | null;
   createdAt: Date;
 }
 
@@ -142,6 +144,7 @@ export function toIssuanceRecord(row: Issuance): IssuanceRecord {
     inviteCode: row.inviteCode,
     supplyBaseUnits: row.tokenSupply * 10n ** BigInt(row.tokenDecimals),
     market: marketOf(row),
+    ownerWallet: row.ownerWallet,
     createdAt: row.createdAt,
   };
 }
@@ -155,8 +158,9 @@ export async function loadIssuance(id: string): Promise<IssuanceRecord> {
 }
 
 /** All issuances, newest first, with participant and distribution counts. */
-export async function listIssuances() {
+export async function listIssuances(where: { ownerWallet?: string } = {}) {
   const rows = await prisma.issuance.findMany({
+    where,
     orderBy: { createdAt: "desc" },
     include: { _count: { select: { participants: true, distributions: true } } },
   });
@@ -192,6 +196,8 @@ export interface PendingIssuance {
   agreement: { hash: string; text: string };
   monetization: MonetizationConfig;
   nextRecordDate: Date;
+  /** Wallet of the API key that launched it; null = admin-owned. */
+  ownerWallet?: string | null;
 }
 
 /** Unguessable, URL-safe, short enough to read out: 10 chars of base64url. */
@@ -225,6 +231,7 @@ export async function insertPendingIssuance(p: PendingIssuance): Promise<Issuanc
       graduationMarketCap: p.graduationMarketCap,
       monetization: JSON.stringify(p.monetization),
       inviteCode: newInviteCode(),
+      ownerWallet: p.ownerWallet ?? null,
     },
   });
   return toIssuanceRecord(row);

@@ -42,6 +42,8 @@ model Issuance {
   recordDateRule        String?
   // closed pilot: onboarding requires this code (SPEC section 6); NULL = not required (older rows)
   inviteCode            String?
+  // Wallet that owns this issuance (the API key holder who created it). NULL = admin-owned (pre-dates wallet login)
+  ownerWallet           String?
 
   // derived, stored
   startingMarketCap     BigInt   // USDC base units
@@ -133,6 +135,7 @@ model IssuancePreview {
   derivedJson String   // LaunchPricing + fee params + economics, as JSON
   usedAt     DateTime?
   issuanceId String?
+  ownerWallet String?  // wallet of the API key that made the preview; copied onto the issuance
   createdAt  DateTime  @default(now())
 }
 
@@ -157,4 +160,28 @@ model SignRequest {
   updatedAt   DateTime  @updatedAt
 
   @@index([purpose, subjectId])
+}
+
+// Wallet login: a founder proves control of a wallet by signing a one-time challenge and gets an API
+// key for the MCP server / skills. Only the sha256 of the key is stored; the key is shown once.
+model ApiKey {
+  id         String    @id @default(cuid())
+  wallet     String
+  tokenHash  String    @unique // sha256 hex of the key
+  label      String?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  @@index([wallet])
+}
+
+// One-time sign-in challenge (SIWS-style message the wallet signs). Consumed on verify.
+model AuthChallenge {
+  nonce     String    @id
+  wallet    String
+  message   String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
 }

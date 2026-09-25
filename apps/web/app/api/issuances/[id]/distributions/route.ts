@@ -1,4 +1,4 @@
-import { requireIssuer } from "@/lib/auth";
+import { assertOwnsIssuance, requireIssuer } from "@/lib/auth";
 import { json } from "@/lib/json";
 import { handle, readJson } from "@/lib/server/http";
 import { listDistributions, reportPeriod } from "@/lib/server/distribution";
@@ -17,10 +17,11 @@ export async function GET(_req: Request, ctx: Ctx) {
 
 // POST /api/issuances/:id/distributions — issuer reports a period (DRAFT). Body: { periodLabel, dcf, reportUrl? }.
 export async function POST(req: Request, ctx: Ctx) {
-  const denied = requireIssuer(req);
-  if (denied) return denied;
+  const auth = await requireIssuer(req);
+  if (auth instanceof Response) return auth;
   return handle(async () => {
     const { id } = await ctx.params;
+    await assertOwnsIssuance(auth, id);
     return json(await reportPeriod(id, await readJson(req)), { status: 201 });
   });
 }

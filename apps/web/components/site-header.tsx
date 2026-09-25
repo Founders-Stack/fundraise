@@ -27,6 +27,7 @@ export function SiteHeader() {
           <nav className="hidden items-center gap-5 font-mono text-[10px] tracking-[0.1em] text-muted-foreground uppercase md:flex">
             <Link href="/#markets" className="hover:text-foreground">Markets</Link>
             <Link href="/#agent" className="hover:text-foreground">For founders</Link>
+            <Link href="/connect" className="hover:text-foreground">Connect agent</Link>
           </nav>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2">
