@@ -56,7 +56,7 @@ rights pool and per-unit amount computed by the API. No money moves here; `fundr
 - `409 duplicate_period`: that label was already reported; show `details.status` and ask for a different label.
 - `409 open_distribution_exists`: finish the open one with `fundraise-distribute` first.
 - `400 invalid_dcf`: the amount wasn't a plain USDC decimal; resend as e.g. `"400000.00"`.
-- `401`: `FS_API_TOKEN` is missing or wrong. `network_error`: the API isn't running at the shown URL.
+- `401`: API key missing or wrong, follow "Auth setup" in the `fundraise` skill (`/fstack:fundraise`), then retry the call once. `network_error`: the API isn't running at the shown URL.
 
 ## Rules
 

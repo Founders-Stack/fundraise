@@ -117,10 +117,13 @@ against `CHAIN_MODE=fake`).
 ```bash
 claude plugin marketplace add Founders-Stack/fundraise
 claude plugin install fstack@founder-stack
-export FS_API_TOKEN=fsk_...     # your key: connect a wallet at https://f-stack.ai/fundraise/connect
 claude
 > /fstack:fundraise
 ```
+
+No key yet? The agent creates `.fstack.env` in your project and asks you to paste your key there (get it at
+https://f-stack.ai/fundraise/connect), then continues. No shell commands needed. `FS_API_TOKEN` in the shell
+env or `~/.fstack/env` also work.
 
 If the shorthand fails (it clones over SSH), use the HTTPS URL instead:
 `claude plugin marketplace add https://github.com/Founders-Stack/fundraise.git`.

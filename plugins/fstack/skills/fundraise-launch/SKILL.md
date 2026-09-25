@@ -18,7 +18,7 @@ Announce the plan in one short message first:
 > I'll collect your terms (with defaults), show you the full preview (price, economics, fees,
 > agreement), and only create the token and market after you say yes.
 
-If any tool returns an error: `status: 401` → `FS_API_TOKEN` is missing or wrong; `network_error` →
+If any tool returns an error: `status: 401` → API key missing or wrong, follow "Auth setup" in the `fundraise` skill (`/fstack:fundraise`), then retry the call once; `network_error` →
 the API is not reachable at `apiUrl` (is `pnpm dev` running?). Stop and say so. Do not work around auth.
 A `400 invalid_terms` lists `details.errors`: show them, ask for corrected values, preview again.
 
