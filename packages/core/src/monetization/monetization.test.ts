@@ -28,11 +28,11 @@ describe("toDbcFeeParams", () => {
     });
   });
 
-  it("SOFTWARE → 50 / 100, creator trading 100", () => {
+  it("SOFTWARE → 50 / 96, creator trading 80", () => {
     expect(toDbcFeeParams(SOFTWARE_CONFIG)).toEqual({
       migrationFeeOption: 6,
-      migrationFee: { feePercentage: 50, creatorFeePercentage: 100 },
-      creatorTradingFeePercentage: 100,
+      migrationFee: { feePercentage: 50, creatorFeePercentage: 96 },
+      creatorTradingFeePercentage: 80,
     });
   });
 
@@ -57,10 +57,10 @@ describe("projectEconomics", () => {
     });
   });
 
-  it("SOFTWARE on 300,000 USDC → 150,000 / 0 / 150,000", () => {
+  it("SOFTWARE on 300,000 USDC → 144,000 / 6,000 / 150,000", () => {
     expect(projectEconomics(SOFTWARE_CONFIG, 300_000n * USDC)).toEqual({
-      issuer: 150_000n * USDC,
-      platform: 0n,
+      issuer: 144_000n * USDC,
+      platform: 6_000n * USDC,
       liquidity: 150_000n * USDC,
     });
   });
@@ -135,10 +135,11 @@ describe("describeFees", () => {
     });
   });
 
-  it("SOFTWARE shows software pricing instead of platform fee", () => {
+  it("SOFTWARE shows the 2% platform fee, trading split and software pricing", () => {
     const d = describeFees(SOFTWARE_CONFIG);
     expect(d.label).toBeUndefined();
-    expect(d.lines.map((l) => l.label)).not.toContain("Founder Stack");
+    expect(d.lines).toContainEqual({ label: "Founder Stack", value: "2%" });
+    expect(d.lines).toContainEqual({ label: "Trading fees", value: "Startup 80% / Founder Stack 20%" });
     expect(d.lines).toContainEqual({ label: "Setup fee", value: "$2,500" });
     expect(d.lines).toContainEqual({ label: "Monthly", value: "$499/mo" });
     expect(d.lines).toContainEqual({ label: "Per distribution", value: "$250" });
@@ -169,13 +170,13 @@ describe("ACCEPTANCE (SPEC §8)", () => {
     expect(otherInputs.threshold).toBe(threshold);
     expect(demo).not.toEqual(software);
     expect(demo.dbcFeeParams.migrationFee).toEqual({ feePercentage: 50, creatorFeePercentage: 96 });
-    expect(software.dbcFeeParams.migrationFee).toEqual({ feePercentage: 50, creatorFeePercentage: 100 });
+    expect(software.dbcFeeParams.migrationFee).toEqual({ feePercentage: 50, creatorFeePercentage: 96 });
     expect(demo.dbcFeeParams.creatorTradingFeePercentage).toBe(50);
-    expect(software.dbcFeeParams.creatorTradingFeePercentage).toBe(100);
+    expect(software.dbcFeeParams.creatorTradingFeePercentage).toBe(80);
     expect(demo.fees.label).toBe("Illustrative protocol economics");
     expect(software.fees.label).toBeUndefined();
     expect(demo.economics.platform).toBe(6_000n * USDC);
-    expect(software.economics.platform).toBe(0n);
+    expect(software.economics.platform).toBe(6_000n * USDC);
     // Presets are not mutated by use.
     expect(DEMO_PROTOCOL_CONFIG.graduation).toEqual({ issuerPct: 48, platformPct: 2, liquidityPct: 50 });
     expect(Object.isFrozen(SOFTWARE_CONFIG)).toBe(true);

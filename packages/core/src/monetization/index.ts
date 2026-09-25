@@ -30,8 +30,8 @@ export const DEMO_PROTOCOL_CONFIG: MonetizationConfig = Object.freeze({
 
 export const SOFTWARE_CONFIG: MonetizationConfig = Object.freeze({
   mode: "SOFTWARE",
-  graduation: Object.freeze({ issuerPct: 50, platformPct: 0, liquidityPct: 50 }),
-  dbcTradingFees: Object.freeze({ creatorPct: 100, partnerPct: 0 }),
+  graduation: Object.freeze({ issuerPct: 48, platformPct: 2, liquidityPct: 50 }),
+  dbcTradingFees: Object.freeze({ creatorPct: 80, partnerPct: 20 }),
   software: Object.freeze({ setupFee: 2500, monthlyFee: 499, perDistributionFee: 250 }),
 }) as MonetizationConfig;
 
@@ -184,6 +184,7 @@ export function describeFees(cfg: MonetizationConfig): FeeDescription {
     return { label: "Illustrative protocol economics", lines };
   }
 
+  if (platformPct > 0) lines.push({ label: "Founder Stack", value: `${platformPct}%` });
   lines.push({ label: "Market liquidity", value: `${liquidityPct}%` });
   lines.push({
     label: "Trading fees",
