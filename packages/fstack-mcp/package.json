@@ -1,6 +1,6 @@
 {
   "name": "fstack-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Founder Stack MCP server: thin typed tools over the /capital API",
   "type": "module",
   "bin": {
