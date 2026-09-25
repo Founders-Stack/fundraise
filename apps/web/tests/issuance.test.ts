@@ -11,6 +11,8 @@ import { GET as quoteGET } from "@/app/api/issuances/[id]/quote/route";
 import { POST as swapPOST } from "@/app/api/issuances/[id]/swap/route";
 import { GET as walletGET } from "@/app/api/issuances/[id]/wallets/[wallet]/route";
 import { ELIGIBILITY_STATEMENT, agreementAcceptanceMessage } from "@/lib/server/agreement-message";
+import { agreementMemo } from "@fstack/core";
+import { fake } from "./fake-chain";
 import { ACME, AUTH, create, ctx, launch, onboard, post, preview, signer } from "./helpers";
 
 const wctx = (id: string, wallet: string) => ({ params: Promise.resolve({ id, wallet }) });
@@ -88,6 +90,19 @@ describe("create gate", () => {
 
     const list = await (await listGET(new Request("http://test", { headers: AUTH }))).json();
     expect(list.issuances.some((i: { id: string }) => i.id === issuanceId)).toBe(true);
+  });
+
+  it("records the issuer's acceptance: a signed memo ties the mint to the agreement hash", async () => {
+    const { issuanceId, agreementHash, baseMint } = await launch({ symbol: "ACPT" });
+    const body = await (await issuanceGET(new Request("http://test"), ctx(issuanceId))).json();
+    const a = body.agreement.issuerAcceptance;
+    expect(a.memo).toBe(agreementMemo(baseMint, agreementHash));
+    expect(a.signer).toBeTruthy();
+    expect(a.signedAt).toBeTruthy();
+    expect(fake.control.memoOf(a.txSignature)).toBe(a.memo);
+    expect(body.agreement.text).toContain("self-attested eligibility");
+    expect(body.agreement.text).not.toContain("completed verification");
+    expect(body.agreement.text).toContain("authorized to bind the Issuer");
   });
 
   it("keeps the launch terms on the issuance (detail and list agree)", async () => {

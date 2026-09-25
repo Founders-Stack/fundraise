@@ -34,6 +34,15 @@ export interface IssuanceMarket {
   chainMode: string | null;
 }
 
+/** The Issuer wallet's on-chain acceptance of the agreement (null on issuances that predate it). */
+export interface IssuerAcceptance {
+  signer: string;
+  memo: string;
+  /** Signature of the tx that carries `memo`. */
+  txSignature: string;
+  signedAt: Date;
+}
+
 export interface IssuanceRecord {
   id: string;
   rightsType: string;
@@ -43,6 +52,7 @@ export interface IssuanceRecord {
   startingMarketCap: bigint;
   graduationMarketCap: bigint;
   agreement: { version: string; hash: string; text: string };
+  issuerAcceptance: IssuerAcceptance | null;
   monetization: MonetizationConfig;
   nextRecordDate: Date | null;
   /** Closed pilot: onboarding requires this code. Issuer-only, never in public views. null = not required. */
@@ -123,6 +133,10 @@ export function toIssuanceRecord(row: Issuance): IssuanceRecord {
     startingMarketCap: row.startingMarketCap,
     graduationMarketCap: row.graduationMarketCap,
     agreement: { version: row.agreementVersion, hash: row.agreementHash, text: row.agreementText },
+    issuerAcceptance:
+      row.issuerSigner && row.agreementMemo && row.agreementMemoTx && row.issuerSignedAt
+        ? { signer: row.issuerSigner, memo: row.agreementMemo, txSignature: row.agreementMemoTx, signedAt: row.issuerSignedAt }
+        : null,
     monetization: monetizationOf(row),
     nextRecordDate: row.nextRecordDate,
     inviteCode: row.inviteCode,
@@ -217,7 +231,11 @@ export async function insertPendingIssuance(p: PendingIssuance): Promise<Issuanc
 }
 
 /** Records the created market on a PENDING issuance (it becomes LIVE). */
-export async function attachMarket(id: string, market: Omit<IssuanceMarket, "dammPool">): Promise<IssuanceRecord> {
+export async function attachMarket(
+  id: string,
+  market: Omit<IssuanceMarket, "dammPool">,
+  acceptance?: { signer: string; memo: string; signature: string },
+): Promise<IssuanceRecord> {
   const stored: StoredDbcConfig = {
     address: market.dbcConfig ?? undefined,
     poolOwners: market.poolOwners,
@@ -232,6 +250,14 @@ export async function attachMarket(id: string, market: Omit<IssuanceMarket, "dam
       quoteMint: market.quoteMint,
       dbcPool: market.dbcPool,
       dbcConfig: JSON.stringify(stored, (_k, v) => (typeof v === "bigint" ? v.toString() : v)),
+      ...(acceptance
+        ? {
+            issuerSigner: acceptance.signer,
+            agreementMemo: acceptance.memo,
+            agreementMemoTx: acceptance.signature,
+            issuerSignedAt: new Date(),
+          }
+        : {}),
     },
   });
   return toIssuanceRecord(row);

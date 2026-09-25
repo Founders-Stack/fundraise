@@ -9,6 +9,7 @@ import { POST as executePOST } from "@/app/api/distributions/[id]/execute/route"
 import { GET as signGET } from "@/app/api/sign/[id]/route";
 import { POST as buildPOST } from "@/app/api/sign/[id]/build/route";
 import { POST as submitPOST } from "@/app/api/sign/[id]/submit/route";
+import { agreementMemo } from "@fstack/core";
 import { fake } from "./fake-chain";
 import { ACME, call, get, launch, onboard, post, preview, signer } from "./helpers";
 
@@ -49,13 +50,13 @@ describe("wallet signing: issuance create", () => {
     const b = await build(c.body.signRequestId, me);
     expect(b.status, JSON.stringify(b.body)).toBe(200);
     expect(b.body.simulated).toBe(true);
-    expect(b.body.txs).toHaveLength(1);
+    expect(b.body.txs).toHaveLength(2); // create tx + the issuer's agreement memo tx
 
     // another wallet can't hijack it; a tampered tx is rejected and the request stays open
     const other = founder();
     expect((await build(c.body.signRequestId, other)).body.error).toBe("wrong_wallet");
     expect((await submit(c.body.signRequestId, other, [b.body.txs[0].tx])).body.error).toBe("wrong_wallet");
-    const bad = await submit(c.body.signRequestId, me, ["dGFtcGVyZWQ="]);
+    const bad = await submit(c.body.signRequestId, me, ["dGFtcGVyZWQ=", b.body.txs[1].tx]);
     expect(bad.status).toBe(502);
     expect((await view(c.body.signRequestId)).body.status).toBe("PENDING");
 
@@ -64,11 +65,15 @@ describe("wallet signing: issuance create", () => {
     expect(s.body.status).toBe("COMPLETED");
     expect(s.body.result.status).toBe("LIVE");
     expect(s.body.result.custody).toMatch(/Founder wallet/);
-    expect(s.body.signatures).toHaveLength(1);
+    expect(s.body.signatures).toHaveLength(2);
 
     const live = (await call(issuanceGET, get(), issuanceId)).body;
     expect(live.status).toBe("LIVE");
     expect(live.chain.dbcPool).toBe(s.body.result.dbcPool);
+    // the founder's wallet is the issuer signer of the agreement memo carried by the create tx
+    expect(live.agreement.issuerAcceptance.signer).toBe(me);
+    expect(live.agreement.issuerAcceptance.memo).toBe(agreementMemo(live.chain.baseMint, live.agreement.hash));
+    expect(fake.control.memoOf(live.agreement.issuerAcceptance.txSignature)).toBe(live.agreement.issuerAcceptance.memo);
     // the market works: the pool exists on the (fake) chain
     expect(s.body.result.inviteCode).toBeTruthy();
     const w = await onboard({ issuanceId, agreementHash: live.agreement.hash, inviteCode: s.body.result.inviteCode }, "Alice");

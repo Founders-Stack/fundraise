@@ -323,16 +323,20 @@ export async function completeIssuanceCreation(issuance: IssuanceRecord, preview
   const chain = await getChain();
   try {
     const res = await chain.market.createIssuancePool(poolInput(issuance));
-    return await attachMarket(issuance.id, {
-      baseMint: res.baseMint,
-      quoteMint: chain.payout.quoteMint(),
-      dbcPool: res.dbcPool,
-      dbcConfig: res.dbcConfig,
-      poolOwners: res.poolOwners,
-      signatures: res.signatures,
-      dbcParams: res.dbcParams,
-      chainMode: chain.mode,
-    });
+    return await attachMarket(
+      issuance.id,
+      {
+        baseMint: res.baseMint,
+        quoteMint: chain.payout.quoteMint(),
+        dbcPool: res.dbcPool,
+        dbcConfig: res.dbcConfig,
+        poolOwners: res.poolOwners,
+        signatures: res.signatures,
+        dbcParams: res.dbcParams,
+        chainMode: chain.mode,
+      },
+      res.agreementAcceptance,
+    );
   } catch (e) {
     await deleteIssuance(issuance.id);
     await prisma.issuancePreview.update({ where: { id: previewId }, data: { usedAt: null, issuanceId: null } });
@@ -352,6 +356,7 @@ function poolInput(issuance: IssuanceRecord): CreatePoolInput {
     graduationMarketCap: issuance.graduationMarketCap,
     fees: toDbcFeeParams(issuance.monetization),
     creatorLockedLiquidityPercentage: 100,
+    agreementHash: issuance.agreement.hash,
   };
 }
 
@@ -367,6 +372,12 @@ export async function createIssuance(previewId: unknown, opts: { signingMode?: u
   return liveIssuanceResult(done, COPY.demoCustody);
 }
 
+/** Public shape of the Issuer's on-chain acceptance (null when it was not recorded). */
+function acceptanceView(rec: IssuanceRecord) {
+  const a = rec.issuerAcceptance;
+  return a ? { signer: a.signer, memo: a.memo, txSignature: a.txSignature, signedAt: a.signedAt } : null;
+}
+
 function liveIssuanceResult(done: IssuanceRecord, custody: string) {
   const market = requireMarket(done);
   return {
@@ -380,6 +391,7 @@ function liveIssuanceResult(done: IssuanceRecord, custody: string) {
     signatures: market.signatures,
     chainMode: market.chainMode,
     agreementHash: done.agreement.hash,
+    issuerAcceptance: acceptanceView(done),
     nextRecordDate: done.nextRecordDate,
     marketUrl: `${appUrl()}/market/${done.id}`,
     /** Share this with investors: it carries the invite code onboarding requires. */
@@ -410,6 +422,10 @@ async function requestIssuanceSignature(pending: IssuanceRecord) {
       { label: "Starting token market cap", value: usdDisplay(pending.startingMarketCap) },
       { label: "Graduation token market cap", value: usdDisplay(pending.graduationMarketCap) },
       { label: "Agreement hash", value: pending.agreement.hash },
+      {
+        label: "Issuer acceptance",
+        value: `You sign twice: the second signature records this hash on-chain and binds ${terms.issuerName} to the agreement. By signing you confirm you may sign for it.`,
+      },
     ],
     warning: "Your wallet pays the network fees and rent for the new accounts (a few hundredths of a SOL).",
     doneUrl: `${appUrl()}/market/${pending.id}`,
@@ -422,8 +438,8 @@ export async function buildIssuanceSignTxs(issuanceId: string, wallet: string): 
   const rec = await loadIssuance(issuanceId);
   if (rec.market) throw new HttpError(409, "already_live", "this issuance already has a market");
   const chain = await getChain();
-  const { tx, pool } = await chain.wallet.buildCreatePoolTx(poolInput(rec), wallet);
-  return { txs: [tx], data: { pool } };
+  const { tx, memoTx, pool } = await chain.wallet.buildCreatePoolTx(poolInput(rec), wallet);
+  return { txs: memoTx ? [tx, memoTx] : [tx], data: { pool } };
 }
 
 /** After the founder's create tx confirmed: server allowlist setup, then attach the market. */
@@ -447,16 +463,32 @@ export async function applyIssuanceSigned(
   await onSignature(signature);
   const signatures = [signature];
   const followUp = await chain.wallet.finalizeCreatePool(pool);
-  const done = await attachMarket(issuanceId, {
-    baseMint: pool.baseMint,
-    quoteMint: chain.payout.quoteMint(),
-    dbcPool: pool.dbcPool,
-    dbcConfig: pool.dbcConfig,
-    poolOwners: pool.poolOwners,
-    signatures: [...signatures, ...followUp.signatures],
-    dbcParams: { ...pool.dbcParams, creator: wallet, signingMode: "wallet" },
-    chainMode: chain.mode,
-  });
+  // The Issuer's acceptance (memo tx) lands after the market exists. If it fails the market stays LIVE
+  // with no recorded acceptance (issuerAcceptance: null) rather than being rolled back.
+  let acceptance: { signer: string; memo: string; signature: string } | undefined;
+  if (pool.agreementMemo && payload.txs[1]) {
+    try {
+      const { signature: memoSig } = await chain.wallet.submitSigned(payload.txs[1], signedTxs[1], wallet);
+      await onSignature(memoSig);
+      acceptance = { signer: wallet, memo: pool.agreementMemo, signature: memoSig };
+    } catch {
+      acceptance = undefined;
+    }
+  }
+  const done = await attachMarket(
+    issuanceId,
+    {
+      baseMint: pool.baseMint,
+      quoteMint: chain.payout.quoteMint(),
+      dbcPool: pool.dbcPool,
+      dbcConfig: pool.dbcConfig,
+      poolOwners: pool.poolOwners,
+      signatures: [...signatures, ...followUp.signatures],
+      dbcParams: { ...pool.dbcParams, creator: wallet, signingMode: "wallet" },
+      chainMode: chain.mode,
+    },
+    acceptance,
+  );
   return liveIssuanceResult(done, WALLET_CUSTODY_LABEL);
 }
 
@@ -496,7 +528,7 @@ export function publicIssuanceView(rec: IssuanceRecord) {
       startingPricePerToken: usdc(rec.startingMarketCap / terms.tokenSupply),
       marketCapLabel: COPY.marketCap,
     },
-    agreement: rec.agreement,
+    agreement: { ...rec.agreement, issuerAcceptance: acceptanceView(rec) },
     chain: {
       baseMint: market?.baseMint ?? null,
       quoteMint: market?.quoteMint ?? null,

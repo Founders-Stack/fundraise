@@ -17,6 +17,19 @@ export interface CreatePoolInput {
   fees: DbcFeeParams;
   /** Issuer LP ownership after graduation: 100 = issuer owns all locked LP (SPEC section 5). */
   creatorLockedLiquidityPercentage: number;
+  /**
+   * sha256 of the Cash Flow Participation Agreement. When set, the transaction the Issuer wallet signs
+   * to create the market carries an SPL Memo `agreementMemo(baseMint, agreementHash)`, so the Issuer's
+   * acceptance and the mint <-> agreement link are on-chain.
+   */
+  agreementHash?: string;
+}
+
+/** The Issuer wallet's on-chain acceptance of the agreement: `signature` is a tx it signed that carries `memo`. */
+export interface AgreementAcceptance {
+  signer: string;
+  memo: string;
+  signature: string;
 }
 
 export interface CreatePoolResult {
@@ -28,6 +41,8 @@ export interface CreatePoolResult {
   signatures: string[];
   /** Normalized params actually sent to DBC, for display ("How your market is configured"). */
   dbcParams: Record<string, unknown>;
+  /** Present when `agreementHash` was passed to the create call. */
+  agreementAcceptance?: AgreementAcceptance;
 }
 
 export interface MarketState {
@@ -142,15 +157,21 @@ export interface UnsignedTx {
   lastValidBlockHeight: number;
 }
 
-export interface WalletPool extends Omit<CreatePoolResult, "signatures"> {
+export interface WalletPool extends Omit<CreatePoolResult, "signatures" | "agreementAcceptance"> {
+  /** Memo carried by the create tx the founder signs (set when `agreementHash` was passed to buildCreatePoolTx). */
+  agreementMemo?: string;
   /** Extra data the adapter needs in finalizeCreatePool (JSON-safe). */
   finalize?: Record<string, unknown>;
 }
 
 /** Wallet-signing seam: builds txs for the founder's wallet instead of signing with server keys. */
 export interface WalletSigningPort {
-  /** Create-pool tx with `creator` as fee payer + pool creator; the pool addresses are fixed now. */
-  buildCreatePoolTx(input: CreatePoolInput, creator: string): Promise<{ tx: UnsignedTx; pool: WalletPool }>;
+  /**
+   * Create-pool tx with `creator` as fee payer + pool creator; the pool addresses are fixed now.
+   * With `input.agreementHash`, also a `memoTx`: a separate memo-only tx (the memo does not fit in the
+   * create tx) whose signature by `creator` is the Issuer's on-chain acceptance of the agreement.
+   */
+  buildCreatePoolTx(input: CreatePoolInput, creator: string): Promise<{ tx: UnsignedTx; memoTx?: UnsignedTx; pool: WalletPool }>;
   /** Server-side follow-up once the founder's create tx landed (Founder Stack allowlist setup). */
   finalizeCreatePool(pool: WalletPool): Promise<{ signatures: string[] }>;
   /** USDC transfers from `from` (the founder's wallet) to each row in ONE tx (caller batches). */

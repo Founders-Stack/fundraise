@@ -31,6 +31,11 @@ model Issuance {
   agreementVersion      String
   agreementHash         String
   agreementText         String
+  // Issuer's acceptance: the wallet that signed the create tx carrying the agreement memo (NULL = not recorded)
+  issuerSigner          String?
+  agreementMemo         String?
+  agreementMemoTx       String?
+  issuerSignedAt        DateTime?
   // launch terms rendered into the agreement; NULL = core default (read through lib/server/issuance-record.ts)
   issuerJurisdiction    String?
   dcfDefinition         String?

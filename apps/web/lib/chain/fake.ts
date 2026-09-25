@@ -5,6 +5,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
+import { agreementMemo } from "@fstack/core";
 import type { ChainPorts, CreatePoolInput, MarketState, UnsignedTx, WalletPool } from "./ports";
 
 type Pool = {
@@ -78,6 +79,7 @@ type FakeWalletTx =
       startingMarketCap: string;
       graduationMarketCap: string;
     }
+  | { kind: "memo"; nonce: string; signer: string; memo: string }
   | { kind: "transfer"; nonce: string; from: string; rows: { wallet: string; amount: string }[] };
 
 const fakeTx = (body: FakeWalletTx, label: string): UnsignedTx => ({
@@ -189,14 +191,18 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
         s.pools[pool.dbcPool] = pool;
         s.allow[baseMint] = [pool.authority];
         s.balances[baseMint] = { [pool.authority]: pool.tokenSupply };
+        const signatures = [sig(), sig()];
+        const memo = input.agreementHash ? agreementMemo(baseMint, input.agreementHash) : undefined;
+        if (memo) (s.memos ??= {})[signatures[0]] = memo;
         save(s);
         return {
           baseMint,
           dbcConfig: pool.dbcConfig,
           dbcPool: pool.dbcPool,
           poolOwners: [pool.authority],
-          signatures: [sig(), sig()],
+          signatures,
           dbcParams: { fake: true, ...input, tokenSupply: input.tokenSupply.toString() },
+          agreementAcceptance: memo ? { signer: ISSUER, memo, signature: signatures[0] } : undefined,
         };
       },
       async getMarketState(dbcPool) {
@@ -294,12 +300,14 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
     // and the effect is applied on submit. The founder's USDC is the fake issuer balance.
     wallet: {
       async buildCreatePoolTx(input, creator) {
+        const addrBase = addr("Mint");
         const pool: WalletPool = {
-          baseMint: addr("Mint"),
+          baseMint: addrBase,
           dbcConfig: addr("Conf"),
           dbcPool: addr("Pool"),
           poolOwners: [addr("Auth")],
           dbcParams: { fake: true, ...input, tokenSupply: input.tokenSupply.toString(), creator },
+          agreementMemo: input.agreementHash ? agreementMemo(addrBase, input.agreementHash) : undefined,
         };
         const body: FakeWalletTx = {
           kind: "create_pool",
@@ -310,7 +318,10 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
           startingMarketCap: input.startingMarketCap.toString(),
           graduationMarketCap: input.graduationMarketCap.toString(),
         };
-        return { tx: fakeTx(body, `Create ${input.symbol} market`), pool };
+        const memoTx = pool.agreementMemo
+          ? fakeTx({ kind: "memo", nonce: randomBytes(8).toString("hex"), signer: creator, memo: pool.agreementMemo }, "Accept the agreement for the issuer")
+          : undefined;
+        return { tx: fakeTx(body, `Create ${input.symbol} market`), memoTx, pool };
       },
       async finalizeCreatePool() {
         return { signatures: [sig()] };
@@ -328,6 +339,7 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
         if (signedTx !== unsigned.tx) throw new Error("signed transaction does not match the prepared one");
         const body = JSON.parse(Buffer.from(unsigned.tx, "base64").toString("utf8")) as FakeWalletTx;
         const s = load();
+        const txSig = sig();
         if (body.kind === "create_pool") {
           if (body.creator !== signer) throw new Error("signer is not the pool creator");
           const { dbcPool, baseMint, dbcConfig, authority } = body.pool;
@@ -344,6 +356,9 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
           };
           s.allow[baseMint] = [authority];
           s.balances[baseMint] = { [authority]: body.tokenSupply };
+        } else if (body.kind === "memo") {
+          if (body.signer !== signer) throw new Error("signer is not the memo signer");
+          (s.memos ??= {})[txSig] = body.memo;
         } else {
           if (body.from !== signer) throw new Error("signer is not the payer");
           const total = body.rows.reduce((a, r) => a + BigInt(r.amount), 0n);
@@ -352,7 +367,7 @@ export function createFakeChain(opts: { file?: string | null } = {}): FakeChain 
           for (const r of body.rows) s.usdc[r.wallet] = (BigInt(s.usdc[r.wallet] ?? "0") + BigInt(r.amount)).toString();
         }
         save(s);
-        return { signature: sig() };
+        return { signature: txSig };
       },
     },
   };

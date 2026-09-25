@@ -36,8 +36,9 @@ import {
   type ConfigParameters,
   type BuildCurveWithMarketCapParams,
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
-import type { DbcFeeParams } from "@fstack/core";
+import { agreementMemo, type DbcFeeParams } from "@fstack/core";
 import { COMMITMENT, computeBudgetIxs, sendTx, type DevnetEnv } from "./env";
+import { memoInstruction } from "./usdc";
 import { addAllowIx, hookAccounts, initializeIx } from "./allowlist";
 
 export const DBC_POOL_AUTHORITY = deriveDbcPoolAuthority();
@@ -177,6 +178,8 @@ export interface CreatedPool {
   pool: PublicKey;
   signatures: string[];
   dbcParams: Record<string, unknown>;
+  /** SPL Memo written in tx1 (signed by the issuer), when an agreement hash was given. */
+  agreementMemo?: string;
 }
 
 /**
@@ -193,7 +196,7 @@ export async function createHookPool(
   env: DevnetEnv,
   meta: { name: string; symbol: string; uri: string },
   curve: CurveInput,
-  opts: { configKeypair?: Keypair; baseMintKeypair?: Keypair } = {},
+  opts: { configKeypair?: Keypair; baseMintKeypair?: Keypair; agreementHash?: string } = {},
 ): Promise<CreatedPool> {
   const { connection, fsAuthority, issuer, quoteMint, allowlistProgram } = env;
   const client = new DynamicBondingCurveClient(connection, COMMITMENT);
@@ -221,9 +224,16 @@ export async function createHookPool(
   if (!createConfigIx || !createPoolIx || rest.length) {
     throw new Error(`createConfigAndPoolWithTransferHook: expected 2 instructions, got ${tx1.instructions.length}`);
   }
-  const t1 = new Transaction().add(...computeBudgetIxs(200_000), createConfigIx);
+  // tx1 is small, so the Issuer's acceptance goes here (the mint address is already fixed): the issuer
+  // wallet signs a memo tying the mint to the agreement hash.
+  const memo = opts.agreementHash ? agreementMemo(baseMintKp.publicKey.toBase58(), opts.agreementHash) : undefined;
+  const t1 = new Transaction().add(
+    ...computeBudgetIxs(200_000),
+    createConfigIx,
+    ...(memo ? [memoInstruction(memo, issuer.publicKey)] : []),
+  );
   t1.feePayer = fsAuthority.publicKey;
-  const sig1 = await sendTx(connection, t1, [fsAuthority, configKp], "dbc.createConfig");
+  const sig1 = await sendTx(connection, t1, memo ? [fsAuthority, configKp, issuer] : [fsAuthority, configKp], "dbc.createConfig");
 
   const t2 = new Transaction().add(
     ...computeBudgetIxs(600_000),
@@ -257,6 +267,7 @@ export async function createHookPool(
     pool,
     signatures: [sig1, sig2],
     dbcParams: describeConfig(params, config),
+    agreementMemo: memo,
   };
 }
 
@@ -311,6 +322,19 @@ export async function buildHookPoolTxForCreator(
     pool: deriveDbcPoolAddress(quoteMint, baseMintKp.publicKey, configKp.publicKey),
     dbcParams: describeConfig(params, config),
   };
+}
+
+/**
+ * A memo-only tx for the founder's wallet: its signature is the Issuer's on-chain acceptance of the
+ * agreement. Separate from the create tx because the create tx plus the memo exceeds the 1232-byte
+ * limit (1311 bytes measured on devnet).
+ */
+export async function buildMemoTx(env: DevnetEnv, memo: string, signer: PublicKey) {
+  const tx = new Transaction().add(memoInstruction(memo, signer));
+  tx.feePayer = signer;
+  const { blockhash, lastValidBlockHeight } = await env.connection.getLatestBlockhash(COMMITMENT);
+  tx.recentBlockhash = blockhash;
+  return { tx, lastValidBlockHeight };
 }
 
 /** createHookPool step 2: fs_allowlist.initialize + allow the DBC pool authority (Founder Stack key). */
