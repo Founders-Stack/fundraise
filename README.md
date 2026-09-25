@@ -122,6 +122,9 @@ claude
 > /fstack:fundraise
 ```
 
+If the shorthand fails (it clones over SSH), use the HTTPS URL instead:
+`claude plugin marketplace add https://github.com/Founders-Stack/fundraise.git`.
+
 `FS_API_URL` defaults to the hosted devnet API (`https://f-stack.ai/fundraise/api`, web:
 `https://f-stack.ai/fundraise`); the plugin runs the published `fstack-mcp` via `npx`. Set `FS_API_URL`
 only to point at your own deployment.
