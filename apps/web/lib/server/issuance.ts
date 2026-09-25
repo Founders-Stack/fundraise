@@ -18,6 +18,7 @@ import {
   type DistributionFrequency,
   type MonetizationConfig,
 } from "@fstack/core";
+import { canManage, type Principal } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getChain, type CreatePoolInput, type WalletPool } from "@/lib/chain";
 import { HttpError, appUrl } from "./http";
@@ -258,13 +259,14 @@ export function buildPreview(input: PreviewInput, now = new Date()) {
   };
 }
 
-export async function createPreview(body: Record<string, unknown>) {
+export async function createPreview(body: Record<string, unknown>, ownerWallet: string | null = null) {
   const input = parsePreviewInput(body);
   const preview = buildPreview(input);
   const row = await prisma.issuancePreview.create({
     data: {
       termsJson: serializeTerms(input),
       derivedJson: JSON.stringify(preview, (_k, v) => (typeof v === "bigint" ? v.toString() : v)),
+      ownerWallet,
     },
   });
   return {
@@ -281,12 +283,16 @@ export async function createPreview(body: Record<string, unknown>) {
  * Step 1 (fast, DB only): claims the preview atomically and inserts a pending Issuance row
  * (baseMint = null). Split from step 2 so creation can move to a background job (H10).
  */
-export async function startIssuanceCreation(previewId: unknown) {
+export async function startIssuanceCreation(previewId: unknown, principal: Principal = { kind: "admin" }) {
   if (typeof previewId !== "string" || previewId.trim() === "") {
     throw new HttpError(400, "preview_required", "previewId is required: call POST /api/issuances/preview first");
   }
   const preview = await prisma.issuancePreview.findUnique({ where: { id: previewId } });
   if (!preview) throw new HttpError(400, "preview_not_found", `No preview ${previewId}: call POST /api/issuances/preview first`);
+  // A wallet key may only use its own previews (admin may use any).
+  if (!canManage(principal, preview.ownerWallet)) {
+    throw new HttpError(403, "not_owner", "This preview was made by a different wallet");
+  }
   if (preview.usedAt) {
     throw new HttpError(409, "preview_already_used", `Preview ${previewId} was already used`, { issuanceId: preview.issuanceId });
   }
@@ -309,6 +315,7 @@ export async function startIssuanceCreation(previewId: unknown) {
       agreement: { hash: agreementHash(agreementText), text: agreementText },
       monetization,
       nextRecordDate: periodContaining(new Date(), terms.distributionFrequency).recordDate,
+      ownerWallet: preview.ownerWallet,
     });
     await prisma.issuancePreview.update({ where: { id: previewId }, data: { issuanceId: issuance.id } });
     return issuance;
@@ -323,16 +330,20 @@ export async function completeIssuanceCreation(issuance: IssuanceRecord, preview
   const chain = await getChain();
   try {
     const res = await chain.market.createIssuancePool(poolInput(issuance));
-    return await attachMarket(issuance.id, {
-      baseMint: res.baseMint,
-      quoteMint: chain.payout.quoteMint(),
-      dbcPool: res.dbcPool,
-      dbcConfig: res.dbcConfig,
-      poolOwners: res.poolOwners,
-      signatures: res.signatures,
-      dbcParams: res.dbcParams,
-      chainMode: chain.mode,
-    });
+    return await attachMarket(
+      issuance.id,
+      {
+        baseMint: res.baseMint,
+        quoteMint: chain.payout.quoteMint(),
+        dbcPool: res.dbcPool,
+        dbcConfig: res.dbcConfig,
+        poolOwners: res.poolOwners,
+        signatures: res.signatures,
+        dbcParams: res.dbcParams,
+        chainMode: chain.mode,
+      },
+      res.agreementAcceptance,
+    );
   } catch (e) {
     await deleteIssuance(issuance.id);
     await prisma.issuancePreview.update({ where: { id: previewId }, data: { usedAt: null, issuanceId: null } });
@@ -352,6 +363,7 @@ function poolInput(issuance: IssuanceRecord): CreatePoolInput {
     graduationMarketCap: issuance.graduationMarketCap,
     fees: toDbcFeeParams(issuance.monetization),
     creatorLockedLiquidityPercentage: 100,
+    agreementHash: issuance.agreement.hash,
   };
 }
 
@@ -359,12 +371,21 @@ function poolInput(issuance: IssuanceRecord): CreatePoolInput {
  * POST /api/issuances. Custody mode (default) creates the market now with server keys; wallet mode
  * (SPEC 0.4 P1) leaves the issuance PENDING and returns a signUrl for the founder's wallet.
  */
-export async function createIssuance(previewId: unknown, opts: { signingMode?: unknown } = {}) {
+export async function createIssuance(
+  previewId: unknown,
+  opts: { signingMode?: unknown; principal?: Principal } = {},
+) {
   const mode = signingMode(opts.signingMode);
-  const pending = await startIssuanceCreation(previewId);
+  const pending = await startIssuanceCreation(previewId, opts.principal);
   if (mode === "wallet") return requestIssuanceSignature(pending);
   const done = await completeIssuanceCreation(pending, previewId as string);
   return liveIssuanceResult(done, COPY.demoCustody);
+}
+
+/** Public shape of the Issuer's on-chain acceptance (null when it was not recorded). */
+function acceptanceView(rec: IssuanceRecord) {
+  const a = rec.issuerAcceptance;
+  return a ? { signer: a.signer, memo: a.memo, txSignature: a.txSignature, signedAt: a.signedAt } : null;
 }
 
 function liveIssuanceResult(done: IssuanceRecord, custody: string) {
@@ -380,6 +401,7 @@ function liveIssuanceResult(done: IssuanceRecord, custody: string) {
     signatures: market.signatures,
     chainMode: market.chainMode,
     agreementHash: done.agreement.hash,
+    issuerAcceptance: acceptanceView(done),
     nextRecordDate: done.nextRecordDate,
     marketUrl: `${appUrl()}/market/${done.id}`,
     /** Share this with investors: it carries the invite code onboarding requires. */
@@ -410,6 +432,10 @@ async function requestIssuanceSignature(pending: IssuanceRecord) {
       { label: "Starting token market cap", value: usdDisplay(pending.startingMarketCap) },
       { label: "Graduation token market cap", value: usdDisplay(pending.graduationMarketCap) },
       { label: "Agreement hash", value: pending.agreement.hash },
+      {
+        label: "Issuer acceptance",
+        value: `You sign twice: the second signature records this hash on-chain and binds ${terms.issuerName} to the agreement. By signing you confirm you may sign for it.`,
+      },
     ],
     warning: "Your wallet pays the network fees and rent for the new accounts (a few hundredths of a SOL).",
     doneUrl: `${appUrl()}/market/${pending.id}`,
@@ -422,8 +448,8 @@ export async function buildIssuanceSignTxs(issuanceId: string, wallet: string): 
   const rec = await loadIssuance(issuanceId);
   if (rec.market) throw new HttpError(409, "already_live", "this issuance already has a market");
   const chain = await getChain();
-  const { tx, pool } = await chain.wallet.buildCreatePoolTx(poolInput(rec), wallet);
-  return { txs: [tx], data: { pool } };
+  const { tx, memoTx, pool } = await chain.wallet.buildCreatePoolTx(poolInput(rec), wallet);
+  return { txs: memoTx ? [tx, memoTx] : [tx], data: { pool } };
 }
 
 /** After the founder's create tx confirmed: server allowlist setup, then attach the market. */
@@ -447,16 +473,32 @@ export async function applyIssuanceSigned(
   await onSignature(signature);
   const signatures = [signature];
   const followUp = await chain.wallet.finalizeCreatePool(pool);
-  const done = await attachMarket(issuanceId, {
-    baseMint: pool.baseMint,
-    quoteMint: chain.payout.quoteMint(),
-    dbcPool: pool.dbcPool,
-    dbcConfig: pool.dbcConfig,
-    poolOwners: pool.poolOwners,
-    signatures: [...signatures, ...followUp.signatures],
-    dbcParams: { ...pool.dbcParams, creator: wallet, signingMode: "wallet" },
-    chainMode: chain.mode,
-  });
+  // The Issuer's acceptance (memo tx) lands after the market exists. If it fails the market stays LIVE
+  // with no recorded acceptance (issuerAcceptance: null) rather than being rolled back.
+  let acceptance: { signer: string; memo: string; signature: string } | undefined;
+  if (pool.agreementMemo && payload.txs[1]) {
+    try {
+      const { signature: memoSig } = await chain.wallet.submitSigned(payload.txs[1], signedTxs[1], wallet);
+      await onSignature(memoSig);
+      acceptance = { signer: wallet, memo: pool.agreementMemo, signature: memoSig };
+    } catch {
+      acceptance = undefined;
+    }
+  }
+  const done = await attachMarket(
+    issuanceId,
+    {
+      baseMint: pool.baseMint,
+      quoteMint: chain.payout.quoteMint(),
+      dbcPool: pool.dbcPool,
+      dbcConfig: pool.dbcConfig,
+      poolOwners: pool.poolOwners,
+      signatures: [...signatures, ...followUp.signatures],
+      dbcParams: { ...pool.dbcParams, creator: wallet, signingMode: "wallet" },
+      chainMode: chain.mode,
+    },
+    acceptance,
+  );
   return liveIssuanceResult(done, WALLET_CUSTODY_LABEL);
 }
 
@@ -496,7 +538,7 @@ export function publicIssuanceView(rec: IssuanceRecord) {
       startingPricePerToken: usdc(rec.startingMarketCap / terms.tokenSupply),
       marketCapLabel: COPY.marketCap,
     },
-    agreement: rec.agreement,
+    agreement: { ...rec.agreement, issuerAcceptance: acceptanceView(rec) },
     chain: {
       baseMint: market?.baseMint ?? null,
       quoteMint: market?.quoteMint ?? null,

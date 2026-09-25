@@ -18,6 +18,14 @@ const FREQ_TEXT: Record<CashFlowTerms["distributionFrequency"], { adj: string; p
   MONTHLY: { adj: "monthly", period: "calendar month" },
 };
 
+/** Prefix of the SPL Memo that binds a token mint to an agreement hash on-chain. */
+export const AGREEMENT_MEMO_PREFIX = "fstack:agreement:v1";
+
+/** On-chain record, signed by the Issuer wallet, that `baseMint` is governed by the agreement with this hash. */
+export function agreementMemo(baseMint: string, hash: string): string {
+  return `${AGREEMENT_MEMO_PREFIX}:${baseMint}:${hash}`;
+}
+
 /** Renders the Cash Flow Participation Agreement as markdown. Deterministic for given terms and cluster. */
 export function renderAgreement(terms: CashFlowTerms, cluster: ClusterConfig = currentCluster()): string {
   const supply = groupThousands(terms.tokenSupply);
@@ -36,7 +44,9 @@ export function renderAgreement(terms: CashFlowTerms, cluster: ClusterConfig = c
 
 ## 1. Parties
 
-This agreement is between **${issuer}** (the "Issuer") and each person or entity that has completed verification through the Founder Stack registry, accepted this agreement, and holds Participation Units in a registered wallet (each, a "Participant").
+This agreement is between **${issuer}** (the "Issuer") and each person or entity that has self-attested eligibility through the Founder Stack registry, accepted this agreement, and holds Participation Units in a registered wallet (each, a "Participant"). Founder Stack does not verify identity; eligibility is the Participant's own confirmation.
+
+The Issuer accepts this agreement by signing, with the Issuer wallet, the transaction that creates the Participation Units. That transaction records this agreement's sha256 and the token mint on-chain (SPL Memo \`${AGREEMENT_MEMO_PREFIX}:<mint>:<sha256>\`). The person signing for the Issuer represents that they are authorized to bind the Issuer to this agreement.
 
 ## 2. Definitions
 
@@ -61,7 +71,7 @@ Distributions are paid in USDC to the Eligible Holder's registered wallet after 
 
 ## 6. Eligibility and transfers
 
-Participation Units may be transferred only to wallets that have completed verification and accepted this agreement. This is enforced at the token level by a Token-2022 transfer hook that checks the Founder Stack registry. The Issuer or Founder Stack may remove a wallet from the registry if its eligibility lapses.
+Participation Units may be transferred only to wallets that have self-attested eligibility and accepted this agreement. This is enforced at the token level by a Token-2022 transfer hook that checks the Founder Stack registry. The Issuer or Founder Stack may remove a wallet from the registry if its eligibility lapses.
 
 ## 7. Nature of the right
 

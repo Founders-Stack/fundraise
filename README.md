@@ -117,13 +117,18 @@ against `CHAIN_MODE=fake`).
 ```bash
 claude plugin marketplace add Founders-Stack/fundraise
 claude plugin install fstack@founder-stack
-export FS_API_TOKEN=<token>      # ask the team for a devnet token
+export FS_API_TOKEN=fsk_...     # your key: connect a wallet at https://f-stack.ai/fundraise/connect
 claude
 > /fstack:fundraise
 ```
 
 If the shorthand fails (it clones over SSH), use the HTTPS URL instead:
 `claude plugin marketplace add https://github.com/Founders-Stack/fundraise.git`.
+
+**Getting a key.** Open `/connect`, connect a wallet and sign one free message (no transaction). You get an
+`fsk_…` API key, shown once. Keys are per wallet: an agent using it can launch and manage only issuances its wallet
+owns. The `FS_API_TOKEN` set on the server stays as the team/admin token and sees everything. Revoke a key with
+`DELETE /api/auth/me`.
 
 `FS_API_URL` defaults to the hosted devnet API (`https://f-stack.ai/fundraise/api`, web:
 `https://f-stack.ai/fundraise`); the plugin runs the published `fstack-mcp` via `npx`. Set `FS_API_URL`

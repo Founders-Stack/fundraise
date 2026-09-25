@@ -71,7 +71,8 @@ describe("swap input validation", () => {
 
 describe("supporting report links", () => {
   it.each(["https://[bad", "https://user:secret@example.com/report", "javascript:alert(1)", "https://exa mple.com", "https://?"])("rejects invalid or credential-bearing URL %s", async (reportUrl) => {
-    const result = await call(reportPOST, post({ periodLabel: "2026-Q3", dcf: "100", reportUrl }), "unused");
+    const issuance = await launch();
+    const result = await call(reportPOST, post({ periodLabel: "2026-Q3", dcf: "100", reportUrl }), issuance.issuanceId);
     expect(result.status).toBe(400);
     expect(result.body.error).toBe("invalid_report_url");
   });

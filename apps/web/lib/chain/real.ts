@@ -6,6 +6,7 @@
 // mock-USDC mint authority) and ISSUER_KEYPAIR (DBC pool creator / payout source). Swaps are NOT
 // signed here: buildSwapTx returns an unsigned tx for the investor's wallet.
 import { PublicKey, Transaction } from "@solana/web3.js";
+import { agreementMemo } from "@fstack/core";
 import { TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import type { ChainPorts, CreatePoolInput, MarketState, SwapMode, SwapQuote, UnsignedTx } from "./ports";
 import { TxError, devnetEnv, loadKeypair, sendSignedTx, sendTx, withRetry } from "./devnet/env";
@@ -13,6 +14,7 @@ import { addAllowIx, isAllowed } from "./devnet/allowlist";
 import {
   DBC_POOL_AUTHORITY,
   buildHookPoolTxForCreator,
+  buildMemoTx,
   buildSwapTransaction,
   createHookPool,
   getPriceFromSqrtPrice,
@@ -56,8 +58,12 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
             fees: input.fees,
             creatorLockedLiquidityPercentage: input.creatorLockedLiquidityPercentage,
           },
+          { agreementHash: input.agreementHash },
         );
         return {
+          agreementAcceptance: created.agreementMemo
+            ? { signer: issuer.publicKey.toBase58(), memo: created.agreementMemo, signature: created.signatures[0] }
+            : undefined,
           baseMint: created.baseMint.toBase58(),
           dbcConfig: created.config.toBase58(),
           dbcPool: created.pool.toBase58(),
@@ -230,9 +236,13 @@ export async function createDevnetPorts(): Promise<ChainPorts> {
             new PublicKey(creator),
           ),
         );
+        const memo = input.agreementHash ? agreementMemo(built.baseMint.toBase58(), input.agreementHash) : undefined;
+        const memoTx = memo ? await withRetry(() => buildMemoTx(env, memo, new PublicKey(creator))) : undefined;
         return {
           tx: { tx: b64(built.tx), label: `Create ${input.symbol} token + market`, lastValidBlockHeight: built.lastValidBlockHeight },
+          memoTx: memoTx && { tx: b64(memoTx.tx), label: "Accept the agreement for the issuer (records its hash on-chain)", lastValidBlockHeight: memoTx.lastValidBlockHeight },
           pool: {
+            agreementMemo: memo,
             baseMint: built.baseMint.toBase58(),
             dbcConfig: built.config.toBase58(),
             dbcPool: built.pool.toBase58(),
