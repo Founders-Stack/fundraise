@@ -16,9 +16,28 @@ show comes from a tool result.** Do not compute prices, yields, fees or payouts 
 Call `fundraise_list_issuances` (no arguments).
 
 If it returns an error, stop and explain. Do not retry or work around it:
-- `status: 401` → "`FS_API_TOKEN` is missing or wrong." Stop.
+- `status: 401` → API key missing or wrong. Run "Auth setup" below, then repeat Step 1 once.
 - `network_error` → "The Founder Stack API is not reachable at `<apiUrl>`. Is the web app running
   (`cd apps/web && pnpm dev`)?" Stop.
+
+## Auth setup (on 401)
+
+The founder never touches the shell. You do the file work; they only copy one key from the browser.
+
+1. Write `.fstack.env` in the current project directory with the Write tool (skip if it exists; then
+   just tell them to replace the value):
+   ```
+   FS_API_TOKEN=
+   ```
+   Add `.fstack.env` to `.gitignore` if the project is a git repo and it is not already listed.
+2. Tell the founder, in this order: open https://f-stack.ai/fundraise/connect, connect a wallet, sign the
+   free message (no transaction), copy the `fsk_…` key (shown once), paste it after `FS_API_TOKEN=` in
+   `.fstack.env`, save, and say "done". Give the absolute path of the file.
+3. Never ask for the key in chat and never echo it. When they say done, repeat the failed call; the MCP
+   server re-reads the file on every request, so no restart is needed. If it still returns 401, the key
+   is wrong or revoked: send them back to the connect page for a new one.
+
+(`FS_API_TOKEN` in the shell env still wins if set; `~/.fstack/env` is a per-user fallback.)
 
 ## Step 2: Route
 

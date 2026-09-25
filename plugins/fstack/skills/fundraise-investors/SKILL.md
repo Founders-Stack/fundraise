@@ -13,7 +13,7 @@ onboarded (self-attested eligibility, signed the agreement, allowlisted). Every 
 If the founder did not name one, call `fundraise_list_issuances`. None → suggest
 `/fstack:fundraise-launch` and stop. Several → ask which (default: most recent).
 
-Errors: `status: 401` → `FS_API_TOKEN` missing or wrong; `network_error` → API not reachable at `apiUrl`.
+Errors: `status: 401` → API key missing or wrong, follow "Auth setup" in the `fundraise` skill (`/fstack:fundraise`), then retry the call once; `network_error` → API not reachable at `apiUrl`.
 Stop and say so.
 
 ## Step 2: Load holders
