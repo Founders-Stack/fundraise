@@ -352,8 +352,25 @@ projectEconomics(cfg, migrationQuoteThreshold) → { issuer, platform, liquidity
 ```
 
 - `feePercentage = issuerPct + platformPct`, and `creatorFeePercentage = issuerPct / feePercentage × 100`, which must be an exact integer. Splits that don't produce one (e.g. 49/2) fail validation.
-- DEMO_PROTOCOL `{48, 2, 50}` → `{50, 96}`. SOFTWARE `{50, 0, 50}` → `{50, 100}`.
+- DEMO_PROTOCOL `{48, 2, 50}` → `{50, 96}`, trading fees 50/50. SOFTWARE `{48, 2, 50}` → `{50, 96}`, trading fees 80/20, plus software pricing ($2,500 setup, $499/mo, $250 per distribution, display only). The two modes differ only in the trading-fee split and the software pricing.
 - **Acceptance test:** switching DEMO_PROTOCOL → SOFTWARE changes only the config object. The rights, hook, registry, distribution and UI code paths are untouched (unit test).
+### 8.1 Where Founder Stack earns: graduation fee vs trading fee
+
+Two different fees, both set once in the pool config at launch and never changed afterwards (existing pools keep the split they were created with).
+
+| | Graduation fee | Trading fee |
+|---|---|---|
+| **What it is** | A one-time cut of the quote (USDC) collected when the curve completes and the pool migrates to DAMM v2 (`migrationQuoteThreshold`) | A fee charged on every swap (buy or sell) while the pool is still on the DBC curve |
+| **When** | Once, at graduation | Continuously, from the first swap until graduation |
+| **Size** | `migrationFee.feePercentage` = `issuerPct + platformPct` of the threshold, 50% in both modes | The rate is the pool's base fee schedule (devnet spike: exponential scheduler from 10% down to 1% over 300 s, collected in the quote token). Our config sets only who gets the fee, not the rate |
+| **Split** | Issuer 48% / Founder Stack 2% / market liquidity 50% (both modes) | `creatorTradingFeePercentage` to the issuer, the rest to the partner (Founder Stack). DEMO_PROTOCOL 50/50. SOFTWARE 80/20 |
+| **Config field** | `graduation` → `migrationFee.{feePercentage, creatorFeePercentage}` | `dbcTradingFees` → `creatorTradingFeePercentage` |
+| **How it is paid out** | Split by the DBC program at migration | Accrues in the pool, claimed separately: `claimCreatorTradingFee2` (issuer) and `claimPartnerTradingFee2` (Founder Stack). The market page shows "Accrued to the startup" and "Accrued to Founder Stack" |
+
+Example, using the devnet threshold of 1,344,055 USDC: graduation pays the issuer about 645k, Founder Stack about 27k and puts about 672k into locked liquidity. Trading fees are a separate, ongoing stream on top of that. Neither fee touches holder distributions, which are paid from the issuer's own cash flow (R1).
+
+After graduation the DBC trading fee stops. The pool is a DAMM v2 pool whose liquidity the issuer locks permanently (`creatorPermanentLockedLiquidityPercentage` 100), and Founder Stack owns none of it, so Founder Stack earns nothing from post-graduation trading in either mode.
+
 - Displayed amounts are read from the pool config (`getPoolMigrationQuoteThreshold`, fee fields). The panel is labeled "Illustrative protocol economics".
 
 ---
@@ -568,3 +585,13 @@ The same engine with a different base. Keep these extension points, but build no
 **Open questions for the feasibility note:** Stripe terms on using restricted keys for third-party attestation; multi-account businesses; revenue outside Stripe (Shopify, Paddle, bank transfers); how investors see revocation.
 
 **Estimate:** restricted-key path ≈ 1–2 days after the hackathon; Stripe App path adds Stripe's review time.
+
+---
+
+## 17. Future: agentic payouts (x402) and zero-knowledge KYC (not in this build)
+
+**Agentic payouts via x402.** Today the founder confirms each distribution in chat (`confirmTotal`) and the API signs the USDC transfers. Later, the distribution step can run as an agent-to-investor payment flow over the x402 payment protocol (HTTP 402 with stablecoin settlement): the issuer's agent reports the period, takes the snapshot and pays each holder in USDC on schedule, with no manual step per period. The founder sets a policy once (which periods, a maximum total per period, an approver for anything outside the policy) instead of confirming every run. This builds on "Automatic scheduled distributions" and the P1 wallet-signing and escrow work (sections 1 and 6). Per-run preview and explicit confirmation stay for anything outside the policy.
+
+**Zero-knowledge KYC.** Not built. Today onboarding is self-attested (section 6). The planned replacement is a zero-knowledge credential check: the investor proves "verified by a KYC provider, eligible jurisdiction, not sanctioned" without the platform storing their identity documents. The check would replace the self-attested flag on the allowlist (`fs_allowlist`) so only holders with a valid proof are registered. The provider, credential format and jurisdiction rules are undecided and need legal input (section 13).
+
+**Wording:** describe both as roadmap. Do not claim the product has KYC, zero-knowledge or otherwise, or that payouts are autonomous today.
